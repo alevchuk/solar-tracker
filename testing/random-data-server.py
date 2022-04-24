@@ -9,6 +9,15 @@ from http.server import HTTPServer
 
 import random
 
+MODE_SCAN_RESET = "scan-reset"
+MODE_SCAN_EXT = "scan-ext"
+MODE_SCAN_RET = "scan-ret"
+MODE_HILL_CLIMB = "hill-climb"
+MODE_HILL_CLIMB_RET = "hill-climb-ret"
+MODE_HILL_CLIMB_EXT = "hill-climb-ext"
+
+SCAN_SLEEP = 20
+
 
 class RandomTestData(object):
     MAX_VALUE = 100
@@ -16,8 +25,30 @@ class RandomTestData(object):
     def __init__(self):
         self.direction = "up"
         self.prev_value = 0
+        self.mode = MODE_SCAN_RESET
+        self.mode_start = time.time()
+        self.next_mode_delay = SCAN_SLEEP
+
+    def update_mode(self):
+        if self.mode_start + self.next_mode_delay < time.time():
+            if self.mode == MODE_SCAN_RET:
+                self.next_mode_delay = SCAN_SLEEP / 2
+            else:
+                self.next_mode_delay = SCAN_SLEEP
+
+            if self.mode == MODE_SCAN_RESET:
+                self.mode = MODE_SCAN_EXT
+            elif self.mode == MODE_SCAN_EXT:
+                self.mode = MODE_SCAN_RET
+            elif self.mode == MODE_SCAN_RET:
+                self.mode = MODE_HILL_CLIMB
+
+            self.mode_start = time.time()
+
 
     def next(self):
+        self.update_mode()
+
         delta = random.random() - 0.5
         if self.direction == "up":
             if delta > 0:
@@ -36,8 +67,17 @@ class RandomTestData(object):
             self.direction = "down"
 
         self.prev_value = new_value
-        return new_value
 
+        if self.mode.startswith(MODE_HILL_CLIMB):
+            if random.random() > 0.5:
+                self.mode = MODE_HILL_CLIMB_EXT
+            else:
+                self.mode = MODE_HILL_CLIMB_RET
+
+        return {
+            'value': new_value,
+            'mode': self.mode
+        }
 
 
 class Metrics(object):
@@ -46,21 +86,19 @@ class Metrics(object):
     NUM_LISTENER_THREADS = 2
 
     def __init__(self):
-        self.value = None
+        self.data = None
         self.last_updated = None
 
-    def setValue(self, value):
-        self.value = value
+    def setData(self, data):
+        self.data = data
         self.last_updated = time.time()
 
-    def getValue(self):
+    def getData(self):
         age = None
         if self.last_updated:
             age = time.time() - self.last_updated
-        return {
-            'value': self.value,
-            'age': age
-        }
+        self.data['age'] = age
+        return self.data
 
 METRICS = Metrics()
 
@@ -70,7 +108,8 @@ class MetricsHandler(BaseHTTPRequestHandler):
         self.send_header("Content-type", "application/json")
         self.end_headers()
 
-        response_obj = METRICS.getValue()
+        response_obj = METRICS.getData()
+        print(response_obj)
         self.wfile.write(json.dumps(response_obj).encode(encoding='utf_8'))
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -98,5 +137,5 @@ class MetricsListenerThread(threading.Thread):
 if __name__ == "__main__":
     generator = RandomTestData()
     while True:
-        METRICS.setValue(generator.next())
+        METRICS.setData(generator.next())
         time.sleep(0.1)

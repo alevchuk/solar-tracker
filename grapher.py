@@ -15,6 +15,14 @@ try:
 except OSError:
     pass
 
+MODE_HILL_CLIMB = "hill-climb"
+MODE_HILL_CLIMB_RET = "hill-climb-ret"
+MODE_HILL_CLIMB_EXT = "hill-climb-ext"
+MODE_SCAN_RESET = "scan-reset"
+MODE_SCAN_EXT = "scan-ext"
+MODE_SCAN_RET = "scan-ret"
+
+
 if not pygame.font:
     print("Warning, fonts disabled")
 
@@ -49,7 +57,7 @@ class RandomTestData(object):
             self.direction = "down"
 
         self.prev_value = new_value
-        return new_value
+        return {'value': new_value, 'age': time.time()}
 
 
 class LiveDataError(Exception):
@@ -70,9 +78,15 @@ class LiveData(object):
     PARAMS = {}
     TIMEOUT_S = 2.0
 
+    def __init__(self, local=False):
+        if local:
+            self.url = "http://127.0.0.1:9732"
+        else:
+            self.url = LiveData.URL
+
     def next(self):
         try:
-            resp = requests.get(url=LiveData.URL, params=LiveData.PARAMS, timeout=LiveData.TIMEOUT_S)
+            resp = requests.get(url=self.url, params=LiveData.PARAMS, timeout=LiveData.TIMEOUT_S)
         except Exception as msg:
             raise LiveDataNoConnection(msg)
 
@@ -89,7 +103,7 @@ class LiveData(object):
         if data["age"] > 5:
             raise LiveDataStale("Age is {} seconds".format(data["age"]))
 
-        return data["value"]
+        return data
 
 
 class LevelChart(object):
@@ -145,7 +159,7 @@ def main():
     clock = pygame.time.Clock()
 
     #liveData = RandomTestData()
-    liveData = LiveData()
+    liveData = LiveData(local=True)
     levelChart = LevelChart(background.get_height())
 
     file_num = 0
@@ -160,7 +174,8 @@ def main():
         level = 0
         watts = None
         try:
-            watts = liveData.next()
+            metrics = liveData.next()
+            watts = metrics["value"]
         except LiveDataError:
             bar_height = background.get_height()
             bar_color = ERROR1_COLOR
@@ -241,7 +256,7 @@ def main():
 
         # Save every frame
         file_num += 1
-        filename = VIDEO_FRAMES_DIR + ("/%06d-%d.png" % (file_num, time.time()))
+        filename = VIDEO_FRAMES_DIR + ("/%06d.png" % (file_num))
         pygame.image.save(background, filename)
 
 
