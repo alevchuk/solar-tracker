@@ -22,6 +22,20 @@ MODE_SCAN_RESET = "scan-reset"
 MODE_SCAN_EXT = "scan-ext"
 MODE_SCAN_RET = "scan-ret"
 
+BG_COLOR = pygame.Color("#000000")
+TEXT_COLOR = pygame.Color("#FFFFFF")
+TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
+
+LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
+HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
+HILL_CLIMB_DOT = pygame.Color("#57F50A")
+
+ERROR1_COLOR = pygame.Color("blue") # error
+ERROR2_COLOR = pygame.Color("red") # starting up...
+ERROR3_COLOR = pygame.Color("green") # data stale
+ERROR4_COLOR = pygame.Color("gray")  # no connection
+
+
 
 if not pygame.font:
     print("Warning, fonts disabled")
@@ -119,17 +133,33 @@ class LevelChart(object):
         return offset, level_count
 
 
-BG_COLOR = pygame.Color("#000000")
-TEXT_COLOR = pygame.Color("#FFFFFF")
-TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
+def draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, chart):
+    # put the bar on the chart
+    bar = pygame.Rect(cursor_pos * bar_width, background.get_height() - bar_height, bar_width, background.get_height())
+    pygame.draw.rect(chart, bar_color, bar)
 
-# LEVELS = [pygame.Color("#239D60"), pygame.Color("#A3DE83"), pygame.Color("#F7F39A")]  # Green
-LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
+    # put the anti-bar on the chart
+    if level == 0:
+        antibar_color = BG_COLOR
+    else:
+        antibar_color = LEVELS[level - 1]
 
-ERROR1_COLOR = pygame.Color("blue") # error
-ERROR2_COLOR = pygame.Color("red") # starting up...
-ERROR3_COLOR = pygame.Color("green") # data stale
-ERROR4_COLOR = pygame.Color("gray")  # no connection
+    antibar_height = background.get_height() - bar_height
+    antibar = pygame.Rect(cursor_pos * bar_width, 0, bar_width, antibar_height)
+    pygame.draw.rect(chart, antibar_color, antibar)
+
+    ## shift
+    #chart.blit(chart, (-bar_width, 0))
+
+def draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf, radius):
+    # put the bar on the chart
+    bar = pygame.Rect(cursor_pos * bar_width, surf.get_height() - bar_height, bar_width, surf.get_height())
+    center = (
+        cursor_pos * bar_width,
+        surf.get_height() - bar_height
+    )
+    pygame.draw.circle(surf, dot_color, center, radius)
+
 
 def main():
     """this function is called when the program starts.
@@ -158,15 +188,19 @@ def main():
 
     clock = pygame.time.Clock()
 
-    #liveData = RandomTestData()
+    # liveData = RandomTestData()
+    liveData = LiveData()
     liveData = LiveData(local=True)
     levelChart = LevelChart(background.get_height())
 
     file_num = 0
     video_start = time.time()
 
+    first_scan_ext = True
+
     # Main Loop
     done = False
+    cursor_pos = 0
     while not done:
         clock.tick(240)
         # pygame.time.wait(200)
@@ -174,8 +208,8 @@ def main():
         level = 0
         watts = None
         try:
-            metrics = liveData.next()
-            watts = metrics["value"]
+            trackerData = liveData.next()
+            watts = trackerData["value"]
         except LiveDataError:
             bar_height = background.get_height()
             bar_color = ERROR1_COLOR
@@ -197,25 +231,35 @@ def main():
             bar_height = offset
             bar_color = LEVELS[level]
 
-        # put the bar on the chart
         bar_width = 3
-        bar = pygame.Rect(background.get_width() - bar_width, background.get_height() - bar_height, bar_width, background.get_height())
-        pygame.draw.rect(chart, bar_color, bar)
 
-        # put the anti-bar on the chart
-        if level == 0:
-            antibar_color = BG_COLOR
+        if trackerData["mode"] == MODE_SCAN_EXT:
+            if first_scan_ext:
+                # erase eveything
+                chart.fill(pygame.Color(BG_COLOR))
+                first_scan_ext = False
+                cursor_pos = 0
+
+            draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, chart)
+            cursor_pos += 1
         else:
-            antibar_color = LEVELS[level - 1]
+            first_scan_ext = True
 
-        antibar_height = background.get_height() - bar_height
-        antibar = pygame.Rect(background.get_width() - bar_width, 0, bar_width, antibar_height)
-        pygame.draw.rect(chart, antibar_color, antibar)
+        if trackerData["mode"] == MODE_SCAN_RET:
+            cursor_pos -= 1
+            draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, chart)
 
-        # shift
-        chart.blit(chart, (-bar_width, 0))
+        if trackerData["mode"] == MODE_HILL_CLIMB_RET:
+            cursor_pos -= 1
 
-        # put the bar on the background
+        if trackerData["mode"] == MODE_HILL_CLIMB_EXT:
+            cursor_pos += 1
+
+        if trackerData["mode"].startswith(MODE_HILL_CLIMB):
+            dot_color = HILL_CLIMB_LEVELS[level]
+            draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf=chart, radius=(bar_width * 2))
+
+        # put the chart on the background
         background.blit(chart, (0, 0))
 
         # put text on the background
@@ -225,25 +269,20 @@ def main():
             font = pygame.font.Font(GRAPHER_FONT, 64 * 5)
             text = "{}W".format(int(watts))
 
-            #outlineSurf = font.render(text, True, TEXT_OUTLINE_COLOR)
-            #outlineSize = outlineSurf.get_size()
-            #textSurf = pygame.Surface((outlineSize[0] + outline*2, outlineSize[1] + 2*outline))
-            #textRect = textSurf.get_rect()
-            #offsets = [(ox, oy) 
-            #    for ox in range(-outline, 2*outline, outline)
-            #    for oy in range(-outline, 2*outline, outline)
-            #    if ox != 0 or ox != 0]
-            #for ox, oy in offsets:   
-            #    px, py = textRect.center
-            #    textSurf.blit(outlineSurf, outlineSurf.get_rect(center = (px+ox, py+oy))) 
-            #innerText = font.render(text, True, TEXT_COLOR)
-            #textSurf.blit(innerText, innerText.get_rect(center = textRect.center)) 
-
             textSurf = font.render(text, True, TEXT_COLOR)
 
             text_width = textSurf.get_width()
-            textpos = textSurf.get_rect(centery=background.get_height() / 2, x=(background.get_width() - text_width))
+
+            textpos = textSurf.get_rect(
+                centery=background.get_height() / 2,
+                x=(background.get_width() - text_width)
+            )
+
             background.blit(textSurf, textpos)
+
+        if trackerData["mode"].startswith(MODE_HILL_CLIMB):
+            dot_color = HILL_CLIMB_DOT
+            draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width * 3))
 
         # Draw Everything
         screen.blit(background, (0, 0))
