@@ -19,19 +19,28 @@ from http.server import HTTPServer
 import logging
 logging.getLogger("imported_module").setLevel(logging.WARNING)
 
+MODE_HILL_CLIMB = "hill-climb"
+MODE_HILL_CLIMB_RET = "hill-climb-ret"
+MODE_HILL_CLIMB_EXT = "hill-climb-ext"
+MODE_SCAN_RESET = "scan-reset"
+MODE_SCAN_EXT = "scan-ext"
+MODE_SCAN_RET = "scan-ret"
+
 ret_channel = 20
 ext_channel = 21
 movement_sleep = 0.3
 measure_sleep = 0.6
 
-scan_sleep = 20
+SCAN_SLEEP = 20
 
 num_samples = 3
 
 optima_pause = 5 * 60
 optima_samples = 8
 
-NUM_MEASUREMENTS = 100
+SCAN_NUM_MEASUREMENTS = 500
+MEASURE_MOVE_RATIO = 10
+SCAN_NUM_MOVES = int(SCAN_NUM_MEASUREMENTS / MEASURE_MOVE_RATIO)
 
 class Metrics(object):
     PORT = 9732
@@ -41,6 +50,10 @@ class Metrics(object):
     def __init__(self):
         self.value = None
         self.last_updated = None
+        self.mode = None
+
+    def setMode(self, mode):
+        self.mode = mode
 
     def setValue(self, value):
         self.value = value
@@ -53,9 +66,7 @@ class Metrics(object):
         return {
             'value': self.value,
             'age': age,
-            'mode': 'scan-ext',
-            #'mode': 'scan-ret',
-            #'mode': 'hill-climb',
+            'mode': self.mode,
         }
 
 METRICS = Metrics()
@@ -67,6 +78,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         response_obj = METRICS.getValue()
+        #print(response_obj)
         self.wfile.write(json.dumps(response_obj).encode(encoding='utf_8'))
 
     def log_message(self, *args):
@@ -183,23 +195,30 @@ def hill_climb(state):
 
         # Try
         if state.attemted_direction == "ret":
+            METRICS.setMode(MODE_HILL_CLIMB_RET)
             r()
         else:
+            METRICS.setMode(MODE_HILL_CLIMB_EXT)
             e()
 
         time.sleep(0.2)
         power_after = read()
 
-        improving = power_after - power_before
+        METRICS.setMode(MODE_HILL_CLIMB)
 
+        improving = power_after - power_before
         improving_list.append(improving)
 
         # Undo
         if state.attemted_direction == "ret":
+            METRICS.setMode(MODE_HILL_CLIMB_EXT)
             e()
         else:
+            METRICS.setMode(MODE_HILL_CLIMB_RET)
             r()
+
         time.sleep(0.2)
+        METRICS.setMode(MODE_HILL_CLIMB)
 
     state.improvement_history.append(sum(improving_list) / len(improving_list))
     if sum(improving_list) >= 0:
@@ -226,8 +245,8 @@ def go_to_lower_extreme():
     setup(channel)
     motor_on(channel)
 
-    for step in range(NUM_MEASUREMENTS):
-        time.sleep(scan_sleep / NUM_MEASUREMENTS)
+    for step in range(SCAN_NUM_MOVES):
+        time.sleep(SCAN_SLEEP / SCAN_NUM_MOVES)
         read()
 
     motor_off(channel)
@@ -240,50 +259,79 @@ def scan():
     hill_buffer_ratio = 0.06
     measurements = []
 
+    METRICS.setMode(MODE_SCAN_RESET)
     go_to_lower_extreme()
 
     # scan
+    METRICS.setMode("scan-ext")
     channel = ext_channel
     setup(channel)
-    motor_on(channel)
-    debug_max = 0
-    for step in range(NUM_MEASUREMENTS):
-        time.sleep(scan_sleep / NUM_MEASUREMENTS)
-        measured_power = read()
-        measurements.append(measured_power)
-        if measured_power > debug_max:
-            debug_max = measured_power
+    for step in range(SCAN_NUM_MOVES):
+        motor_on(channel)
 
-    motor_off(channel)
+        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+            measured_power = read()
+            measurements.append(measured_power)
+            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
 
-    print("Max found: %.3f W" % (measured_power / 1000))
+        motor_off(channel)
 
-    hill = max(measurements)
-    print(measurements)
-    found_hill = False
+        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+            measured_power = read()
+            measurements.append(measured_power)
+            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
+
+    # Remove outliers
+    avg_measured_power = sum(measurements) / len(measurements)
+    new_measured_power = []
+    for i in measurements:
+        if i < avg_measured_power * 1.5:
+            new_measured_power.append(i)
+
+    hill_milliwatts = max(new_measured_power)
+    hill_lower_bound = hill_milliwatts - hill_milliwatts * hill_buffer_ratio / 2
+    print("Max found: %.3f W" % (hill_milliwatts / 1000))
 
     # localize to be on top of the hill
+    found_hill = False
+    measurements = []
+    METRICS.setMode(MODE_SCAN_RET)
     channel = ret_channel
     setup(channel)
-    motor_on(channel)
-    for step in range(NUM_MEASUREMENTS):
-        time.sleep(scan_sleep / NUM_MEASUREMENTS)
-        measured_power = read()
+    for step in range(SCAN_NUM_MOVES):
+        motor_on(channel)
 
-        lower_bound = hill - hill * hill_buffer_ratio / 2
-        if measured_power > lower_bound:
+        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+            measured_power = read()
+            measurements.append(measured_power)
+            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
+
+        motor_off(channel)
+
+        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+            measured_power = read()
+            measurements.append(measured_power)
+            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
+
+        # Remove outliers
+        avg_measured_power = sum(measurements) / len(measurements)
+        new_measured_power = []
+        for i in measurements:
+            if i < avg_measured_power * 1.5:
+                new_measured_power.append(i)
+
+        if max(new_measured_power) > hill_lower_bound:
             found_hill = True
+            hill_milliwatts = max(new_measured_power)
             break
 
-    motor_off(channel)
-
     if found_hill:
-        print("Hill found: {}".format(hill))
-        pretty_print(hill)
+        print("Hill found: {}".format(hill_milliwatts / 1000))
+        pretty_print(hill_milliwatts)
         print()
     else:
         print("Hill NOT found! Was looking for:")
-        pretty_print(hill)
+        pretty_print(hill_milliwatts)
         print()
 
     return found_hill

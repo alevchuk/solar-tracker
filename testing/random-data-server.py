@@ -31,7 +31,7 @@ class RandomTestData(object):
 
     def update_mode(self):
         if self.mode_start + self.next_mode_delay < time.time():
-            if self.mode == MODE_SCAN_RET:
+            if self.mode == MODE_SCAN_EXT:
                 self.next_mode_delay = SCAN_SLEEP / 2
             else:
                 self.next_mode_delay = SCAN_SLEEP
@@ -42,6 +42,8 @@ class RandomTestData(object):
                 self.mode = MODE_SCAN_RET
             elif self.mode == MODE_SCAN_RET:
                 self.mode = MODE_HILL_CLIMB
+            elif self.mode.startswith(MODE_HILL_CLIMB):
+                self.mode = MODE_SCAN_RESET
 
             self.mode_start = time.time()
 
@@ -52,10 +54,12 @@ class RandomTestData(object):
         delta = random.random() - 0.5
         if self.direction == "up":
             if delta > 0:
-                delta *= 2
+                if not self.mode.startswith(MODE_HILL_CLIMB):
+                    delta *= 2
         else:
             if delta < 0:
-                delta *= 2
+                if not self.mode.startswith(MODE_HILL_CLIMB):
+                    delta *= 2
 
         new_value = self.prev_value + delta * 5
         if new_value < 0:

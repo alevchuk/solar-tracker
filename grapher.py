@@ -130,6 +130,10 @@ class LevelChart(object):
         while(offset > self.screen_height):
             offset -= self.screen_height
             level_count += 1
+
+        if level_count > len(LEVELS) - 1:
+            level_count = len(LEVELS) - 1
+
         return offset, level_count
 
 
@@ -189,8 +193,8 @@ def main():
     clock = pygame.time.Clock()
 
     # liveData = RandomTestData()
-    liveData = LiveData()
     liveData = LiveData(local=True)
+    liveData = LiveData()
     levelChart = LevelChart(background.get_height())
 
     file_num = 0
@@ -201,15 +205,19 @@ def main():
     # Main Loop
     done = False
     cursor_pos = 0
+    mode = None
+
     while not done:
         clock.tick(240)
         # pygame.time.wait(200)
 
         level = 0
         watts = None
+        has_error = True
         try:
             trackerData = liveData.next()
             watts = trackerData["value"]
+            mode = trackerData["mode"]
         except LiveDataError:
             bar_height = background.get_height()
             bar_color = ERROR1_COLOR
@@ -223,17 +231,18 @@ def main():
             bar_height = background.get_height()
             bar_color = ERROR4_COLOR
         else:
+            has_error = False
             value = (watts / liveData.MAX_VALUE) * background.get_height() * len(LEVELS)
             offset, level = levelChart.get_offset(value)
-            if level > len(LEVELS) - 1:
-                level = len(LEVELS) - 1
-
             bar_height = offset
             bar_color = LEVELS[level]
 
+        if has_error or mode is None:
+            mode = MODE_SCAN_RET  # if error fallback to mode that draws bars
+
         bar_width = 3
 
-        if trackerData["mode"] == MODE_SCAN_EXT:
+        if mode == MODE_SCAN_EXT:
             if first_scan_ext:
                 # erase eveything
                 chart.fill(pygame.Color(BG_COLOR))
@@ -245,17 +254,17 @@ def main():
         else:
             first_scan_ext = True
 
-        if trackerData["mode"] == MODE_SCAN_RET:
+        if mode == MODE_SCAN_RET:
             cursor_pos -= 1
             draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, chart)
 
-        if trackerData["mode"] == MODE_HILL_CLIMB_RET:
+        if mode == MODE_HILL_CLIMB_RET:
             cursor_pos -= 1
 
-        if trackerData["mode"] == MODE_HILL_CLIMB_EXT:
+        if mode == MODE_HILL_CLIMB_EXT:
             cursor_pos += 1
 
-        if trackerData["mode"].startswith(MODE_HILL_CLIMB):
+        if mode.startswith(MODE_HILL_CLIMB):
             dot_color = HILL_CLIMB_LEVELS[level]
             draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf=chart, radius=(bar_width * 2))
 
@@ -264,9 +273,7 @@ def main():
 
         # put text on the background
         if pygame.font and watts:
-            outline = 5
-
-            font = pygame.font.Font(GRAPHER_FONT, 64 * 5)
+            font = pygame.font.Font(GRAPHER_FONT, 250)
             text = "{}W".format(int(watts))
 
             textSurf = font.render(text, True, TEXT_COLOR)
@@ -280,7 +287,7 @@ def main():
 
             background.blit(textSurf, textpos)
 
-        if trackerData["mode"].startswith(MODE_HILL_CLIMB):
+        if mode.startswith(MODE_HILL_CLIMB):
             dot_color = HILL_CLIMB_DOT
             draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width * 3))
 
