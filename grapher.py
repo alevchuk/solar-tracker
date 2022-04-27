@@ -137,9 +137,9 @@ class LevelChart(object):
         return offset, level_count
 
 
-def draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, chart):
+def draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart):
     # put the bar on the chart
-    bar = pygame.Rect(cursor_pos * bar_width, background.get_height() - bar_height, bar_width, background.get_height())
+    bar = pygame.Rect(pos * bar_width, background.get_height() - bar_height, bar_width, background.get_height())
     pygame.draw.rect(chart, bar_color, bar)
 
     # put the anti-bar on the chart
@@ -149,17 +149,17 @@ def draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, ch
         antibar_color = LEVELS[level - 1]
 
     antibar_height = background.get_height() - bar_height
-    antibar = pygame.Rect(cursor_pos * bar_width, 0, bar_width, antibar_height)
+    antibar = pygame.Rect(pos * bar_width, 0, bar_width, antibar_height)
     pygame.draw.rect(chart, antibar_color, antibar)
 
     ## shift
     #chart.blit(chart, (-bar_width, 0))
 
-def draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf, radius):
+def draw_dot(pos, bar_height, bar_width, dot_color, surf, radius):
     # put the bar on the chart
-    bar = pygame.Rect(cursor_pos * bar_width, surf.get_height() - bar_height, bar_width, surf.get_height())
+    bar = pygame.Rect(pos * bar_width, surf.get_height() - bar_height, bar_width, surf.get_height())
     center = (
-        cursor_pos * bar_width,
+        pos * bar_width,
         surf.get_height() - bar_height
     )
     pygame.draw.circle(surf, dot_color, center, radius)
@@ -193,8 +193,8 @@ def main():
     clock = pygame.time.Clock()
 
     # liveData = RandomTestData()
-    liveData = LiveData(local=True)
     liveData = LiveData()
+    liveData = LiveData(local=True)
     levelChart = LevelChart(background.get_height())
 
     file_num = 0
@@ -204,7 +204,6 @@ def main():
 
     # Main Loop
     done = False
-    cursor_pos = 0
     mode = None
 
     while not done:
@@ -212,12 +211,14 @@ def main():
         # pygame.time.wait(200)
 
         level = 0
+        pos = 0
         watts = None
         has_error = True
         try:
             trackerData = liveData.next()
             watts = trackerData["value"]
             mode = trackerData["mode"]
+            pos = trackerData["pos"]
         except LiveDataError:
             bar_height = background.get_height()
             bar_color = ERROR1_COLOR
@@ -237,36 +238,27 @@ def main():
             bar_height = offset
             bar_color = LEVELS[level]
 
+        bar_width = 3
         if has_error or mode is None:
             mode = MODE_SCAN_RET  # if error fallback to mode that draws bars
-
-        bar_width = 3
+            bar_width = 10
 
         if mode == MODE_SCAN_EXT:
             if first_scan_ext:
                 # erase eveything
                 chart.fill(pygame.Color(BG_COLOR))
                 first_scan_ext = False
-                cursor_pos = 0
 
-            draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, chart)
-            cursor_pos += 1
+            draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart)
         else:
             first_scan_ext = True
 
         if mode == MODE_SCAN_RET:
-            cursor_pos -= 1
-            draw_bar(level, cursor_pos, bar_height, bar_width, bar_color, background, chart)
-
-        if mode == MODE_HILL_CLIMB_RET:
-            cursor_pos -= 1
-
-        if mode == MODE_HILL_CLIMB_EXT:
-            cursor_pos += 1
+            draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart)
 
         if mode.startswith(MODE_HILL_CLIMB):
             dot_color = HILL_CLIMB_LEVELS[level]
-            draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf=chart, radius=(bar_width * 2))
+            draw_dot(pos, bar_height, bar_width, dot_color, surf=chart, radius=(bar_width * 2))
 
         # put the chart on the background
         background.blit(chart, (0, 0))
@@ -289,7 +281,7 @@ def main():
 
         if mode.startswith(MODE_HILL_CLIMB):
             dot_color = HILL_CLIMB_DOT
-            draw_dot(cursor_pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width * 3))
+            draw_dot(pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width * 3))
 
         # Draw Everything
         screen.blit(background, (0, 0))
