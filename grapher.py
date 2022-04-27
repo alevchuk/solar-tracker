@@ -26,8 +26,10 @@ BG_COLOR = pygame.Color("#000000")
 TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 
-LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
-HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
+#LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
+#HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
+LEVELS = [pygame.Color("#150050"), pygame.Color("#610094")]  # Dark Purple
+HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#339400")]
 HILL_CLIMB_DOT = pygame.Color("#57F50A")
 
 ERROR1_COLOR = pygame.Color("blue") # error
@@ -193,11 +195,11 @@ def main():
     clock = pygame.time.Clock()
 
     # liveData = RandomTestData()
-    liveData = LiveData()
     liveData = LiveData(local=True)
+    liveData = LiveData()
     levelChart = LevelChart(background.get_height())
 
-    file_num = 0
+    frame_num = 0
     video_start = time.time()
 
     first_scan_ext = True
@@ -207,38 +209,39 @@ def main():
     mode = None
 
     while not done:
-        clock.tick(240)
+        clock.tick(40)
         # pygame.time.wait(200)
 
-        level = 0
-        pos = 0
-        watts = None
-        has_error = True
-        try:
-            trackerData = liveData.next()
-            watts = trackerData["value"]
-            mode = trackerData["mode"]
-            pos = trackerData["pos"]
-        except LiveDataError:
-            bar_height = background.get_height()
-            bar_color = ERROR1_COLOR
-        except LiveDataStartingUp:
-            bar_height = background.get_height()
-            bar_color = ERROR2_COLOR
-        except LiveDataStale:
-            bar_height = background.get_height()
-            bar_color = ERROR3_COLOR
-        except LiveDataNoConnection:
-            bar_height = background.get_height()
-            bar_color = ERROR4_COLOR
-        else:
-            has_error = False
-            value = (watts / liveData.MAX_VALUE) * background.get_height() * len(LEVELS)
-            offset, level = levelChart.get_offset(value)
-            bar_height = offset
-            bar_color = LEVELS[level]
+        if frame_num % 8 == 0:
+            level = 0
+            pos = 0
+            watts = None
+            has_error = True
+            try:
+                trackerData = liveData.next()
+                watts = trackerData["value"]
+                mode = trackerData["mode"]
+                pos = trackerData["pos"]
+            except LiveDataError:
+                bar_height = background.get_height()
+                bar_color = ERROR1_COLOR
+            except LiveDataStartingUp:
+                bar_height = background.get_height()
+                bar_color = ERROR2_COLOR
+            except LiveDataStale:
+                bar_height = background.get_height()
+                bar_color = ERROR3_COLOR
+            except LiveDataNoConnection:
+                bar_height = background.get_height()
+                bar_color = ERROR4_COLOR
+            else:
+                has_error = False
+                value = (watts / liveData.MAX_VALUE) * background.get_height() * len(LEVELS)
+                offset, level = levelChart.get_offset(value)
+                bar_height = offset
+                bar_color = LEVELS[level]
 
-        bar_width = 3
+        bar_width = 10
         if has_error or mode is None:
             mode = MODE_SCAN_RET  # if error fallback to mode that draws bars
             bar_width = 10
@@ -246,6 +249,7 @@ def main():
         if mode == MODE_SCAN_EXT:
             if first_scan_ext:
                 # erase eveything
+                print("Erasing eveything!")
                 chart.fill(pygame.Color(BG_COLOR))
                 first_scan_ext = False
 
@@ -287,14 +291,14 @@ def main():
         screen.blit(background, (0, 0))
         pygame.display.flip()
 
-        if file_num % 100 == 0:
+        if frame_num % 100 == 0:
             video_duration = time.time() - video_start
-            fps = file_num / video_duration
+            fps = frame_num / video_duration
             print("FPS: %.3f (video duration: %.3fs)" % (fps, video_duration))
 
         # Save every frame
-        file_num += 1
-        filename = VIDEO_FRAMES_DIR + ("/%06d.png" % (file_num))
+        frame_num += 1
+        filename = VIDEO_FRAMES_DIR + ("/%06d.png" % (frame_num))
         pygame.image.save(background, filename)
 
 

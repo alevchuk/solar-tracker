@@ -26,21 +26,26 @@ MODE_SCAN_RESET = "scan-reset"
 MODE_SCAN_EXT = "scan-ext"
 MODE_SCAN_RET = "scan-ret"
 
-ret_channel = 20
-ext_channel = 21
-movement_sleep = 0.3
+RET_CHANNEL = 20
+EXT_CHANNEL = 21
 measure_sleep = 0.6
 
-SCAN_SLEEP = 20
 
 num_samples = 3
 
 optima_pause = 5 * 60
 optima_samples = 8
 
-SCAN_NUM_MEASUREMENTS = 500
-MEASURE_MOVE_RATIO = 10
-SCAN_NUM_MOVES = int(SCAN_NUM_MEASUREMENTS / MEASURE_MOVE_RATIO)
+SCAN_SLEEP = 20
+SCAN_NUM_MOVES = 50 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
+MEASURE_MOVE_RATIO = 10  # scan has this many meanusments per move
+# Also:
+# - hill climbing takes one measurement per move
+# - scan has finer granularity than hill climbing
+SCAN_NUM_MEASUREMENTS = SCAN_NUM_MOVES * MEASURE_MOVE_RATIO
+DELAY_BETWEEN_MOVES = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan and hill climbing
+DELAY_BETWEEN_MEASUREMENTS = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS  # during scan
+
 
 class Metrics(object):
     PORT = 9732
@@ -51,6 +56,7 @@ class Metrics(object):
         self.value = None
         self.last_updated = None
         self.mode = None
+        self.pos = None
 
     def setMode(self, mode):
         self.mode = mode
@@ -58,6 +64,9 @@ class Metrics(object):
     def setValue(self, value):
         self.value = value
         self.last_updated = time.time()
+
+    def setPos(self, value):
+        self.pos = value
 
     def getValue(self):
         age = None
@@ -67,6 +76,7 @@ class Metrics(object):
             'value': self.value,
             'age': age,
             'mode': self.mode,
+            'pos': self.pos
         }
 
 METRICS = Metrics()
@@ -78,8 +88,15 @@ class MetricsHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         response_obj = METRICS.getValue()
-        #print(response_obj)
         self.wfile.write(json.dumps(response_obj).encode(encoding='utf_8'))
+
+        # debug print in a way thats easy to read
+        value = response_obj.get("value")
+        new_obj = {}
+        for k, v in response_obj.items():
+            if k != "value":
+                new_obj[k] = v
+        print("{}\t{}".format(new_obj, value))
 
     def log_message(self, *args):
         pass
@@ -119,7 +136,7 @@ def motor_off(pin):
     GPIO.output(pin, GPIO.LOW)  # Turn motor off
 
 
-def test(channel):
+def move_arm(channel, movement_sleep):
     setup(channel)
     motor_on(channel)
     time.sleep(movement_sleep)
@@ -149,7 +166,7 @@ def pretty_print(measured_power):
     print("*" * int(term_width * ratio))
 
 
-def read():
+def read(state):
     # Instantiate the ina object with the above constants
     ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS, address=0x40)
     # Configure the object with the expected bus voltage
@@ -161,28 +178,14 @@ def read():
 
     try:
         measured_power = ina.power()  # Power in milliwatts
-        pretty_print(measured_power)
+        #pretty_print(measured_power)
 
         METRICS.setValue(measured_power / 1000)
+        METRICS.setPos(state.pos)
 
         return measured_power
     except DeviceRangeError as e:
         print("Current overflow")
-
-
-def r():
-     try:
-         test(ret_channel)
-         GPIO.cleanup()
-     except KeyboardInterrupt:
-         GPIO.cleanup()
-
-def e():
-     try:
-         test(ext_channel)
-         GPIO.cleanup()
-     except KeyboardInterrupt:
-         GPIO.cleanup()
 
 
 def hill_climb(state):
@@ -191,18 +194,18 @@ def hill_climb(state):
     improving_list = []
     for attempt in range(num_samples):
         improving = 0
-        power_before = read()
+        power_before = read(state)
 
         # Try
         if state.attemted_direction == "ret":
             METRICS.setMode(MODE_HILL_CLIMB_RET)
-            r()
+            state.hillClimbRet()
         else:
             METRICS.setMode(MODE_HILL_CLIMB_EXT)
-            e()
+            state.hillClimbExt()
 
         time.sleep(0.2)
-        power_after = read()
+        power_after = read(state)
 
         METRICS.setMode(MODE_HILL_CLIMB)
 
@@ -212,10 +215,10 @@ def hill_climb(state):
         # Undo
         if state.attemted_direction == "ret":
             METRICS.setMode(MODE_HILL_CLIMB_EXT)
-            e()
+            state.hillClimbExt()
         else:
             METRICS.setMode(MODE_HILL_CLIMB_RET)
-            r()
+            state.hillClimbRet()
 
         time.sleep(0.2)
         METRICS.setMode(MODE_HILL_CLIMB)
@@ -224,9 +227,9 @@ def hill_climb(state):
     if sum(improving_list) >= 0:
         # Advance in favorable direction
         if state.attemted_direction == "ret":
-            r()
+            state.hillClimbRet()
         else:
-            e()
+            state.hillClimbExt()
         time.sleep(0.2)
     else:
         if state.attemted_direction == "ret":
@@ -240,53 +243,30 @@ def hill_climb(state):
         state.descision_history = state.descision_history[-optima_samples:]
 
 
-def go_to_lower_extreme():
-    channel = ret_channel
-    setup(channel)
-    motor_on(channel)
 
-    for step in range(SCAN_NUM_MOVES):
-        time.sleep(SCAN_SLEEP / SCAN_NUM_MOVES)
-        read()
-
-    motor_off(channel)
-
-
-def scan():
+def scan(state):
     """
     Returns True if the hill is found
     """
     hill_buffer_ratio = 0.06
-    measurements = []
 
     METRICS.setMode(MODE_SCAN_RESET)
-    go_to_lower_extreme()
+    state.goToLowerExtreme()
 
     # scan
     METRICS.setMode("scan-ext")
-    channel = ext_channel
-    setup(channel)
-    for step in range(SCAN_NUM_MOVES):
-        motor_on(channel)
-
-        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
-            measured_power = read()
-            measurements.append(measured_power)
-            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
-
-        motor_off(channel)
-
-        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
-            measured_power = read()
-            measurements.append(measured_power)
-            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
-
-    # Remove outliers
-    avg_measured_power = sum(measurements) / len(measurements)
     new_measured_power = []
-    for i in measurements:
-        if i < avg_measured_power * 1.5:
-            new_measured_power.append(i)
+    for _ in range(SCAN_NUM_MOVES):
+        measurements = state.moveMeasure(ret=False)
+
+        # Remove outliers
+        no_outliers = []
+        avg_measured_power = sum(measurements) / len(measurements)
+        for i in measurements:
+            if i < avg_measured_power * 1.5:
+                no_outliers.append(i)
+
+        new_measured_power.append(sum(no_outliers) / len(no_outliers))
 
     hill_milliwatts = max(new_measured_power)
     hill_lower_bound = hill_milliwatts - hill_milliwatts * hill_buffer_ratio / 2
@@ -294,24 +274,10 @@ def scan():
 
     # localize to be on top of the hill
     found_hill = False
-    measurements = []
+    measurements = None
     METRICS.setMode(MODE_SCAN_RET)
-    channel = ret_channel
-    setup(channel)
-    for step in range(SCAN_NUM_MOVES):
-        motor_on(channel)
-
-        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
-            measured_power = read()
-            measurements.append(measured_power)
-            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
-
-        motor_off(channel)
-
-        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
-            measured_power = read()
-            measurements.append(measured_power)
-            time.sleep(SCAN_SLEEP / SCAN_NUM_MEASUREMENTS)
+    for _ in range(SCAN_NUM_MOVES):
+        measurements = state.moveMeasure(ret=True)
 
         # Remove outliers
         avg_measured_power = sum(measurements) / len(measurements)
@@ -342,19 +308,89 @@ class TrackerState(object):
         self.descision_history = []
         self.improvement_history = []
         self.attemted_direction = "ext"
+        self.pos = 0
+
+    def resetPos(self):
+        self.pos = 0
+
+    def hillClimbRet(self):
+        try:
+            move_arm(RET_CHANNEL, DELAY_BETWEEN_MOVES)
+            GPIO.cleanup()
+        except KeyboardInterrupt:
+            GPIO.cleanup()
+        else:
+            self.pos -= 1
+    
+    def hillClimbExt(self):
+        try:
+            move_arm(EXT_CHANNEL, DELAY_BETWEEN_MOVES)
+            GPIO.cleanup()
+        except KeyboardInterrupt:
+            GPIO.cleanup()
+        else:
+            self.pos += 1
+
+    def _moveMeasure(self, ret):
+        measurements = []
+
+        if ret:
+            channel = RET_CHANNEL
+            self.pos -= 1
+        else:
+            channel = EXT_CHANNEL
+            self.pos += 1
+
+        setup(channel)
+        motor_on(channel)
+
+        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+            measured_power = read(state)
+            measurements.append(measured_power)
+            delay = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS
+            time.sleep(delay)
+
+        motor_off(channel)
+
+        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+            measured_power = read(state)
+            measurements.append(measured_power)
+            delay = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS
+            time.sleep(delay)
+
+        return measurements
+
+    def moveMeasure(self, ret=True):
+        try:
+            return self._moveMeasure(ret)
+            GPIO.cleanup()
+        except KeyboardInterrupt:
+            GPIO.cleanup()
+
+    def goToLowerExtreme(self):
+        channel = RET_CHANNEL
+
+        setup(channel)
+        motor_on(channel)
+        num_moves = 5
+        for _ in range(num_moves):
+            time.sleep(SCAN_SLEEP / num_moves)
+            read(state)
+
+        motor_off(channel)
+        self.pos = 0
+
 
 
 if __name__ == "__main__":
-
     state = TrackerState()
-
     scan_every_n_moves = 100
     n = 0
     while(True):
         if n % scan_every_n_moves == 0:
-            found = scan()
+            found = scan(state)
             while(not found):
-                found = scan()
+                found = scan(state)
 
         hill_climb(state)
         n += 1
