@@ -46,6 +46,7 @@ SCAN_NUM_MEASUREMENTS = SCAN_NUM_MOVES * MEASURE_MOVE_RATIO
 DELAY_BETWEEN_MOVES = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan and hill climbing
 DELAY_BETWEEN_MEASUREMENTS = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS  # during scan
 
+SCAN_RET_BUFFER = int(SCAN_NUM_MOVES * 0.20)  #  NOTE: set high for demo of hill climbing, so accuracy will be low when localizing after a scan
 
 class Metrics(object):
     PORT = 9732
@@ -243,6 +244,15 @@ def hill_climb(state):
         state.descision_history = state.descision_history[-optima_samples:]
 
 
+def remove_outliers(measurements):
+    no_outliers = []
+    avg_measured_power = sum(measurements) / len(measurements)
+    for i in measurements:
+        if i > avg_measured_power * 1.5:
+            continue  # ignore this measurment
+        no_outliers.append(i)
+    return no_outliers
+
 
 def scan(state):
     """
@@ -255,22 +265,18 @@ def scan(state):
 
     # scan
     METRICS.setMode("scan-ext")
-    new_measured_power = []
+
+    max_measured_power = 0
+    hill_pos = 0
     for _ in range(SCAN_NUM_MOVES):
         measurements = state.moveMeasure(ret=False)
+        measurements = remove_outliers(measurements)
+        for m in measurements:
+            if m > max_measured_power:
+                max_measured_power = m
+                hill_pos = state.pos
 
-        # Remove outliers
-        no_outliers = []
-        avg_measured_power = sum(measurements) / len(measurements)
-        for i in measurements:
-            if i < avg_measured_power * 1.5:
-                no_outliers.append(i)
-
-        new_measured_power.append(sum(no_outliers) / len(no_outliers))
-
-    hill_milliwatts = max(new_measured_power)
-    hill_lower_bound = hill_milliwatts - hill_milliwatts * hill_buffer_ratio / 2
-    print("Max found: %.3f W" % (hill_milliwatts / 1000))
+    print("Max found: %.3f W at position %d" % (max_measured_power / 1000, hill_pos))
 
     # localize to be on top of the hill
     found_hill = False
@@ -278,26 +284,20 @@ def scan(state):
     METRICS.setMode(MODE_SCAN_RET)
     for _ in range(SCAN_NUM_MOVES):
         measurements = state.moveMeasure(ret=True)
+        measurements = remove_outliers(measurements)
 
-        # Remove outliers
-        avg_measured_power = sum(measurements) / len(measurements)
-        new_measured_power = []
-        for i in measurements:
-            if i < avg_measured_power * 1.5:
-                new_measured_power.append(i)
-
-        if max(new_measured_power) > hill_lower_bound:
+        if hill_pos - SCAN_RET_BUFFER < state.pos < hill_pos + SCAN_RET_BUFFER:
             found_hill = True
-            hill_milliwatts = max(new_measured_power)
+            max_measured_power2 = max(measurements)
             break
 
     if found_hill:
-        print("Hill found: {}".format(hill_milliwatts / 1000))
-        pretty_print(hill_milliwatts)
+        print("Hill found: {}".format(max_measured_power2 / 1000))
+        pretty_print(max_measured_power2)
         print()
     else:
         print("Hill NOT found! Was looking for:")
-        pretty_print(hill_milliwatts)
+        pretty_print(max_measured_power2)
         print()
 
     return found_hill
