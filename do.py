@@ -90,13 +90,13 @@ class MetricsHandler(BaseHTTPRequestHandler):
         response_obj = METRICS.getValue()
         self.wfile.write(json.dumps(response_obj).encode(encoding='utf_8'))
 
-        # debug print in a way thats easy to read
-        value = response_obj.get("value")
-        new_obj = {}
-        for k, v in response_obj.items():
-            if k != "value":
-                new_obj[k] = v
-        print("{}\t{}".format(new_obj, value))
+        # # debug print in a way thats easy to read
+        # value = response_obj.get("value")
+        # new_obj = {}
+        # for k, v in response_obj.items():
+        #     if k != "value":
+        #         new_obj[k] = v
+        # print("{}\t{}".format(new_obj, value))
 
     def log_message(self, *args):
         pass
@@ -314,6 +314,9 @@ class TrackerState(object):
         self.pos = 0
 
     def hillClimbRet(self):
+        if self.pos <= 0:
+            return
+
         try:
             move_arm(RET_CHANNEL, DELAY_BETWEEN_MOVES)
             GPIO.cleanup()
@@ -323,6 +326,9 @@ class TrackerState(object):
             self.pos -= 1
     
     def hillClimbExt(self):
+        if self.pos >= SCAN_NUM_MOVES:
+            return
+
         try:
             move_arm(EXT_CHANNEL, DELAY_BETWEEN_MOVES)
             GPIO.cleanup()

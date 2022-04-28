@@ -182,8 +182,8 @@ class DataFetcherThread(threading.Thread):
         self.start()
 
         self.liveData = RandomTestData()
-        self.liveData = LiveData()
         self.liveData = LiveData(local=True)
+        self.liveData = LiveData()
 
     def run(self):
         while (True):
