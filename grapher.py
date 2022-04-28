@@ -9,11 +9,17 @@ import requests
 # for video exporter
 import time
 
+# for data fetching
+import threading
+import queue
+
 VIDEO_FRAMES_DIR = "video-frames"
 try:
     os.makedirs(VIDEO_FRAMES_DIR)
 except OSError:
     pass
+
+DATA_FETCH_PERIOD_MS = 250  # milliseconds
 
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
@@ -36,7 +42,6 @@ ERROR1_COLOR = pygame.Color("blue") # error
 ERROR2_COLOR = pygame.Color("red") # starting up...
 ERROR3_COLOR = pygame.Color("green") # data stale
 ERROR4_COLOR = pygame.Color("gray")  # no connection
-
 
 
 if not pygame.font:
@@ -167,6 +172,44 @@ def draw_dot(pos, bar_height, bar_width, dot_color, surf, radius):
     pygame.draw.circle(surf, dot_color, center, radius)
 
 
+
+DATA_Q = queue.Queue(maxsize=5)
+
+class DataFetcherThread(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.start()
+
+        self.liveData = RandomTestData()
+        self.liveData = LiveData()
+        self.liveData = LiveData(local=True)
+
+    def run(self):
+        while (True):
+            start_s = time.time()
+            print("{} <--- Current queue size".format(DATA_Q.qsize()))
+
+            try:
+                trackerData = self.liveData.next()
+            except Exception as e:
+                trackerData = {}
+                trackerData["exception"] = e
+
+            DATA_Q.put(trackerData)
+
+            run_duration_s = time.time() - start_s
+            sleep_for_s = DATA_FETCH_PERIOD_MS / 1000 - run_duration_s
+
+            print("Sleeping for {} seconds".format(sleep_for_s))
+            if sleep_for_s > 0:
+                time.sleep(sleep_for_s)
+
+
+# Run in the background
+DataFetcherThread()
+
+
 def main():
     """this function is called when the program starts.
     it initializes everything it needs, then runs in
@@ -194,9 +237,6 @@ def main():
 
     clock = pygame.time.Clock()
 
-    # liveData = RandomTestData()
-    liveData = LiveData(local=True)
-    liveData = LiveData()
     levelChart = LevelChart(background.get_height())
 
     frame_num = 0
@@ -209,19 +249,30 @@ def main():
     mode = None
 
     while not done:
-        clock.tick(40)
+        # clock.tick(80)
         # pygame.time.wait(200)
 
-        if frame_num % 8 == 0:
-            level = 0
-            pos = 0
-            watts = None
-            has_error = True
+        level = 0
+        pos = 0
+        watts = None
+        has_error = True
+
+        trackerData = DATA_Q.get()
+        print(trackerData)
+
+        if "exception" not in trackerData:
+            watts = trackerData["value"]
+            mode = trackerData["mode"]
+            pos = trackerData["pos"]
+
+            has_error = False
+            value = (watts / LiveData.MAX_VALUE) * background.get_height() * len(LEVELS)
+            offset, level = levelChart.get_offset(value)
+            bar_height = offset
+            bar_color = LEVELS[level]
+        else:
             try:
-                trackerData = liveData.next()
-                watts = trackerData["value"]
-                mode = trackerData["mode"]
-                pos = trackerData["pos"]
+                raise trackerData["exception"]
             except LiveDataError:
                 bar_height = background.get_height()
                 bar_color = ERROR1_COLOR
@@ -234,12 +285,6 @@ def main():
             except LiveDataNoConnection:
                 bar_height = background.get_height()
                 bar_color = ERROR4_COLOR
-            else:
-                has_error = False
-                value = (watts / liveData.MAX_VALUE) * background.get_height() * len(LEVELS)
-                offset, level = levelChart.get_offset(value)
-                bar_height = offset
-                bar_color = LEVELS[level]
 
         bar_width = 10
         if has_error or mode is None:
@@ -248,9 +293,8 @@ def main():
 
         if mode == MODE_SCAN_EXT:
             if first_scan_ext:
-                # erase eveything
-                print("Erasing eveything!")
-                chart.fill(pygame.Color(BG_COLOR))
+                # print("Erasing eveything!")
+                # chart.fill(pygame.Color(BG_COLOR))
                 first_scan_ext = False
 
             draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart)
