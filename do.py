@@ -46,8 +46,6 @@ SCAN_NUM_MEASUREMENTS = SCAN_NUM_MOVES * MEASURE_MOVE_RATIO
 DELAY_BETWEEN_MOVES = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan and hill climbing
 DELAY_BETWEEN_MEASUREMENTS = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS  # during scan
 
-SCAN_RET_BUFFER = int(SCAN_NUM_MOVES * 0.15)  #  NOTE: drive asccuracy when localizing after a scan. the lower the more accriate. currently this is set high for demo of hill climbing, so accuracy will be low
-
 class Metrics(object):
     PORT = 9732
     ADDR = ('', PORT)
@@ -289,8 +287,6 @@ def scan(state):
     """
     Returns True if the hill is found
     """
-    hill_buffer_ratio = 0.06
-
     METRICS.setMode(MODE_SCAN_RESET)
     state.goToLowerExtreme()
 
@@ -315,7 +311,7 @@ def scan(state):
     for _ in range(SCAN_NUM_MOVES):
         measurements = state.moveMeasure(ret=True)
 
-        if hill_pos - SCAN_RET_BUFFER < state.pos < hill_pos + SCAN_RET_BUFFER:
+        if hill_pos == state.pos:
             found_hill = True
             max_measured_power2 = max(measurements)
             break
