@@ -17,7 +17,7 @@ MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
 
 SCAN_SLEEP = 20
-SCAN_NUM_MOVES = 50 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
+SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
 MEASURE_MOVE_RATIO = 10  # scan has this many meanusments per move
 # Also:
 # - hill climbing takes one measurement per move
@@ -132,7 +132,7 @@ class Metrics(object):
             self.data['age'] = age
             return self.data
         else:
-            return {}
+            return {'starting': True}
 
 METRICS = Metrics()
 

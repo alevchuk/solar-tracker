@@ -38,18 +38,12 @@ LEVELS = [pygame.Color("#150050"), pygame.Color("#610094")]  # Dark Purple
 HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#339400")]
 HILL_CLIMB_DOT = pygame.Color("#57F50A")
 
-ERROR1_COLOR = pygame.Color("blue") # error
-ERROR2_COLOR = pygame.Color("red") # starting up...
-ERROR3_COLOR = pygame.Color("green") # data stale
-ERROR4_COLOR = pygame.Color("gray")  # no connection
-
-
 if not pygame.font:
     print("Warning, fonts disabled")
 
 GRAPHER_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 if not os.path.isfile(GRAPHER_FONT):
-	GRAPHER_FONT = None
+    GRAPHER_FONT = None
 
 
 class RandomTestData(object):
@@ -93,6 +87,14 @@ class LiveDataStale(Exception):
 class LiveDataNoConnection(Exception):
     pass
 
+ERROR_COLOR_MAP = {
+   LiveDataError: pygame.Color("red"),
+   LiveDataStartingUp: pygame.Color("blue"),
+   LiveDataStale: pygame.Color("green"),
+   LiveDataNoConnection: pygame.Color("gray")
+}
+
+
 class LiveData(object):
     MAX_VALUE = 100
     URL = "http://10.55.0.11:9732"
@@ -113,13 +115,16 @@ class LiveData(object):
 
         try:
             data = resp.json()
+            if "starting" in data:
+                raise LiveDataStartingUp("Staring up...")
+
             if "value" not in data or "age" not in data:
                 raise LiveDataError("Wrong json: {}".format(data))
+        except LiveDataStartingUp:
+            raise
         except Exception as msg:
             raise LiveDataError("Unknown exception: {}".format(msg))
 
-        if data.get("age") is None:
-            raise LiveDataStartingUp("Staring up...")
 
         if data["age"] > 5:
             raise LiveDataStale("Age is {} seconds".format(data["age"]))
@@ -144,9 +149,9 @@ class LevelChart(object):
         return offset, level_count
 
 
-def draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart):
+def draw_bar(pos, level, bar_height, bar_width, bar_color, chart):
     # put the bar on the chart
-    bar = pygame.Rect(pos * bar_width, background.get_height() - bar_height, bar_width, background.get_height())
+    bar = pygame.Rect(pos * bar_width, chart.get_height() - bar_height, bar_width, chart.get_height())
     pygame.draw.rect(chart, bar_color, bar)
 
     # put the anti-bar on the chart
@@ -155,7 +160,7 @@ def draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart):
     else:
         antibar_color = LEVELS[level - 1]
 
-    antibar_height = background.get_height() - bar_height
+    antibar_height = chart.get_height() - bar_height
     antibar = pygame.Rect(pos * bar_width, 0, bar_width, antibar_height)
     pygame.draw.rect(chart, antibar_color, antibar)
 
@@ -182,8 +187,8 @@ class DataFetcherThread(threading.Thread):
         self.start()
 
         self.liveData = RandomTestData()
-        self.liveData = LiveData(local=True)
         self.liveData = LiveData()
+        self.liveData = LiveData(local=True)
 
     def run(self):
         while (True):
@@ -227,10 +232,18 @@ def main():
     background = background.convert()
     background.fill(BG_COLOR)
 
-    # chart
-    chart = pygame.Surface(screen.get_size())
-    chart = background.convert()
-    chart.fill(pygame.Color(BG_COLOR))
+    # Surface 1 (bars only)
+    bar_chart = pygame.Surface(screen.get_size())
+    bar_chart = bar_chart.convert()
+
+    # Surface 2 (bars and dots)
+    bar_dot_chart = pygame.Surface(screen.get_size())
+    bar_dot_chart = bar_dot_chart.convert()
+
+    # Surface 3 (pring errors)
+    errSurf = pygame.Surface(screen.get_size())
+    errSurf = errSurf.convert()
+    errSurf.fill(BG_COLOR)
 
     # Display The Background
     screen.blit(background, (0, 0))
@@ -255,84 +268,114 @@ def main():
         level = 0
         pos = 0
         watts = None
-        has_error = True
 
         trackerData = DATA_Q.get()
         print(trackerData)
 
-        if "exception" not in trackerData:
+        if "exception" in trackerData:
+            # erase previous error
+            errSurf.fill(BG_COLOR)
+
+            # draw a footer indicating an error
+            error_color = ERROR_COLOR_MAP[type(trackerData["exception"])]
+            footer_height = 50
+            footer = pygame.Rect(0, errSurf.get_height() - footer_height, errSurf.get_width(), footer_height)
+            pygame.draw.rect(errSurf, error_color, footer)
+
+            # put name of the exception in the rectangle
+            if pygame.font:
+                font = pygame.font.Font(GRAPHER_FONT, 32)
+                text = type(trackerData["exception"]).__name__
+                textSurf = font.render(text, True, BG_COLOR)
+                text_width = textSurf.get_width()
+                textpos = textSurf.get_rect(
+                    centery=(errSurf.get_height() - footer_height / 2),
+                    centerx=(errSurf.get_width() / 2),
+                )
+                errSurf.blit(textSurf, textpos)
+
+            # put text of the exception on the errSurf
+            if pygame.font:
+                font = pygame.font.Font(GRAPHER_FONT, 32)
+                text = str(trackerData["exception"])
+                textLines = []
+                terminal_width = 40
+                while text != "":
+                    textLines.append(text[0:terminal_width])
+                    text = text[terminal_width:]
+
+                y_offset = 0
+                margin = 10
+                linespacing = 10
+                for line in textLines: 
+                    textSurf = font.render(line, True, TEXT_COLOR)
+                    text_width = textSurf.get_width()
+                    textpos = textSurf.get_rect(
+                        y=y_offset,
+                        x=(errSurf.get_width() - text_width - margin)
+                    )
+                    y_offset += (linespacing + textpos.h)
+                    errSurf.blit(textSurf, textpos)
+
+            # Draw Everything
+            screen.blit(errSurf, (0, 0))
+        else:
             watts = trackerData["value"]
             mode = trackerData["mode"]
             pos = trackerData["pos"]
 
-            has_error = False
             value = (watts / LiveData.MAX_VALUE) * background.get_height() * len(LEVELS)
             offset, level = levelChart.get_offset(value)
             bar_height = offset
             bar_color = LEVELS[level]
-        else:
-            try:
-                raise trackerData["exception"]
-            except LiveDataError:
-                bar_height = background.get_height()
-                bar_color = ERROR1_COLOR
-            except LiveDataStartingUp:
-                bar_height = background.get_height()
-                bar_color = ERROR2_COLOR
-            except LiveDataStale:
-                bar_height = background.get_height()
-                bar_color = ERROR3_COLOR
-            except LiveDataNoConnection:
-                bar_height = background.get_height()
-                bar_color = ERROR4_COLOR
+            bar_width = 5
 
-        bar_width = 10
-        if has_error or mode is None:
-            mode = MODE_SCAN_RET  # if error fallback to mode that draws bars
-            bar_width = 10
+            if mode == MODE_SCAN_EXT:
+                if first_scan_ext:
+                    print("Erasing dot chart!")
+                    bar_dot_chart.blit(bar_chart, (0, 0))
+                    first_scan_ext = False
 
-        if mode == MODE_SCAN_EXT:
-            if first_scan_ext:
-                # print("Erasing eveything!")
-                # chart.fill(pygame.Color(BG_COLOR))
-                first_scan_ext = False
+                # draw bars on both surfaces
+                for i in [bar_chart, bar_dot_chart]:
+                    draw_bar(pos, level, bar_height, bar_width, bar_color, i)
+            else:
+                first_scan_ext = True
 
-            draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart)
-        else:
-            first_scan_ext = True
+            if mode == MODE_SCAN_RET:
+                for i in [bar_chart, bar_dot_chart]:
+                    draw_bar(pos, level, bar_height, bar_width, bar_color, i)
 
-        if mode == MODE_SCAN_RET:
-            draw_bar(pos, level, bar_height, bar_width, bar_color, background, chart)
+            if mode.startswith(MODE_HILL_CLIMB):
+                dot_color = HILL_CLIMB_LEVELS[level]
+                draw_dot(pos, bar_height, bar_width, dot_color, radius=(bar_width * 2), surf=bar_dot_chart)
 
-        if mode.startswith(MODE_HILL_CLIMB):
-            dot_color = HILL_CLIMB_LEVELS[level]
-            draw_dot(pos, bar_height, bar_width, dot_color, surf=chart, radius=(bar_width * 2))
+            # put the dot chart on the background
+            background.blit(bar_dot_chart, (0, 0))
 
-        # put the chart on the background
-        background.blit(chart, (0, 0))
+            # put text on the background
+            if pygame.font and watts:
+                font = pygame.font.Font(GRAPHER_FONT, 250)
+                text = "{}W".format(int(watts))
 
-        # put text on the background
-        if pygame.font and watts:
-            font = pygame.font.Font(GRAPHER_FONT, 250)
-            text = "{}W".format(int(watts))
+                textSurf = font.render(text, True, TEXT_COLOR)
 
-            textSurf = font.render(text, True, TEXT_COLOR)
+                text_width = textSurf.get_width()
 
-            text_width = textSurf.get_width()
+                textpos = textSurf.get_rect(
+                    centery=background.get_height() / 2,
+                    x=(background.get_width() - text_width)
+                )
 
-            textpos = textSurf.get_rect(
-                centery=background.get_height() / 2,
-                x=(background.get_width() - text_width)
-            )
+                background.blit(textSurf, textpos)
 
-            background.blit(textSurf, textpos)
+            if mode.startswith(MODE_HILL_CLIMB):
+                dot_color = HILL_CLIMB_DOT
+                draw_dot(pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width * 3))
 
-        if mode.startswith(MODE_HILL_CLIMB):
-            dot_color = HILL_CLIMB_DOT
-            draw_dot(pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width * 3))
+            # Draw Everything
+            screen.blit(background, (0, 0))
 
-        # Draw Everything
-        screen.blit(background, (0, 0))
         pygame.display.flip()
 
         if frame_num % 100 == 0:
