@@ -38,6 +38,8 @@ class RandomTestData(object):
         self.next_mode_delay = SCAN_SLEEP
         self.pos = 0
         self.num_measurments = 0
+        self.start_of_scan = None
+
 
     def update_mode(self):
         if self.mode_start + self.next_mode_delay < time.time():
@@ -83,11 +85,15 @@ class RandomTestData(object):
 
         self.prev_value = new_value
 
+        efficiency_pct = None
         if self.mode.startswith(MODE_HILL_CLIMB):
             if random.random() > 0.5:
                 self.mode = MODE_HILL_CLIMB_EXT
             else:
                 self.mode = MODE_HILL_CLIMB_RET
+
+            if self.start_of_scan is not None and self.start_of_scan != 0:
+                efficiency_pct = (new_value / self.start_of_scan) * 100
 
         if self.mode == MODE_HILL_CLIMB_EXT:
             self.pos += 1
@@ -97,17 +103,24 @@ class RandomTestData(object):
         if self.num_measurments % MEASURE_MOVE_RATIO == 0:
             if self.mode == MODE_SCAN_EXT:
                 self.pos += 1
+                if self.pos == 1:
+                    self.start_of_scan = new_value
             elif self.mode == MODE_SCAN_RET:
                 self.pos -= 1
 
         if self.mode == MODE_SCAN_RESET:
             self.pos = 0
 
-        return {
+        retval = {
             'value': new_value,
             'mode': self.mode,
             'pos': self.pos,
         }
+
+        if efficiency_pct is not None:
+            retval["efficiency_pct"] = efficiency_pct
+
+        return retval
 
 
 class Metrics(object):

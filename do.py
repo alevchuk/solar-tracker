@@ -37,7 +37,7 @@ optima_pause = 5 * 60
 optima_samples = 8
 
 SCAN_SLEEP = 20
-SCAN_NUM_MOVES = 50 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
+SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
 MEASURE_MOVE_RATIO = 10  # scan has this many meanusments per move
 # Also:
 # - hill climbing takes one measurement per move
@@ -46,7 +46,7 @@ SCAN_NUM_MEASUREMENTS = SCAN_NUM_MOVES * MEASURE_MOVE_RATIO
 DELAY_BETWEEN_MOVES = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan and hill climbing
 DELAY_BETWEEN_MEASUREMENTS = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS  # during scan
 
-SCAN_RET_BUFFER = int(SCAN_NUM_MOVES * 0.20)  #  NOTE: set high for demo of hill climbing, so accuracy will be low when localizing after a scan
+SCAN_RET_BUFFER = int(SCAN_NUM_MOVES * 0.15)  #  NOTE: drive asccuracy when localizing after a scan. the lower the more accriate. currently this is set high for demo of hill climbing, so accuracy will be low
 
 class Metrics(object):
     PORT = 9732
@@ -58,27 +58,42 @@ class Metrics(object):
         self.last_updated = None
         self.mode = None
         self.pos = None
+        self.efficiency_pct = None
 
     def setMode(self, mode):
         self.mode = mode
 
     def setValue(self, value):
+        assert value is not None
         self.value = value
         self.last_updated = time.time()
 
     def setPos(self, value):
         self.pos = value
 
+    def setEfficiency(self, value):
+        self.efficiency_pct = value
+
     def getValue(self):
         age = None
         if self.last_updated:
             age = time.time() - self.last_updated
-        return {
+
+        if self.value is None:
+            return {'starting': True}
+
+        retval = {
             'value': self.value,
             'age': age,
             'mode': self.mode,
             'pos': self.pos
         }
+
+        if self.efficiency_pct is not None:
+            retval["efficiency_pct"] = self.efficiency_pct
+
+        return retval
+
 
 METRICS = Metrics()
 
@@ -177,6 +192,10 @@ def read(state):
             voltage_range=ina.RANGE_32V,
     )
 
+    while (not ina.is_conversion_ready()):
+        print("INA Conversion not ready, sleeping for 100 ms")
+        time.sleep(0.1)
+
     try:
         measured_power = ina.power()  # Power in milliwatts
         #pretty_print(measured_power)
@@ -196,6 +215,7 @@ def hill_climb(state):
     for attempt in range(num_samples):
         improving = 0
         power_before = read(state)
+        state.updateEfficiency(power_before)
 
         # Try
         if state.attemted_direction == "ret":
@@ -207,6 +227,7 @@ def hill_climb(state):
 
         time.sleep(0.2)
         power_after = read(state)
+        state.updateEfficiency(power_after)
 
         METRICS.setMode(MODE_HILL_CLIMB)
 
@@ -245,12 +266,18 @@ def hill_climb(state):
 
 
 def remove_outliers(measurements):
+    cutoff = 1.2
     no_outliers = []
-    avg_measured_power = sum(measurements) / len(measurements)
-    for i in measurements:
-        if i > avg_measured_power * 1.5:
-            continue  # ignore this measurment
-        no_outliers.append(i)
+    if len(measurements) > 0:
+        avg_measured_power = sum(measurements) / len(measurements)
+        delta = avg_measured_power * cutoff - avg_measured_power
+        for i in measurements:
+            if i < avg_measured_power - delta or i > avg_measured_power + delta:
+                human_measurements = ["%.3f" % (i / 1000) for i in measurements]
+                print("OUTLIER: dropping {} from {}".format("%.3f" % (i / 1000), human_measurements))
+                continue  # ignore this measurment
+            no_outliers.append(i)
+
     return no_outliers
 
 
@@ -270,7 +297,6 @@ def scan(state):
     hill_pos = 0
     for _ in range(SCAN_NUM_MOVES):
         measurements = state.moveMeasure(ret=False)
-        measurements = remove_outliers(measurements)
         for m in measurements:
             if m > max_measured_power:
                 max_measured_power = m
@@ -284,7 +310,6 @@ def scan(state):
     METRICS.setMode(MODE_SCAN_RET)
     for _ in range(SCAN_NUM_MOVES):
         measurements = state.moveMeasure(ret=True)
-        measurements = remove_outliers(measurements)
 
         if hill_pos - SCAN_RET_BUFFER < state.pos < hill_pos + SCAN_RET_BUFFER:
             found_hill = True
@@ -309,9 +334,12 @@ class TrackerState(object):
         self.improvement_history = []
         self.attemted_direction = "ext"
         self.pos = 0
+        self.start_of_scan = None
 
-    def resetPos(self):
-        self.pos = 0
+    def updateEfficiency(self, new_value):
+        if self.start_of_scan is not None and self.start_of_scan != 0:
+            efficiency_pct = (new_value / self.start_of_scan) * 100
+            METRICS.setEfficiency(efficiency_pct)
 
     def hillClimbRet(self):
         if self.pos <= 0:
@@ -339,6 +367,7 @@ class TrackerState(object):
 
     def _moveMeasure(self, ret):
         measurements = []
+        first_move = False
 
         if ret:
             channel = RET_CHANNEL
@@ -346,6 +375,8 @@ class TrackerState(object):
         else:
             channel = EXT_CHANNEL
             self.pos += 1
+            if self.pos == 1:
+                first_move = True
 
         setup(channel)
         motor_on(channel)
@@ -363,6 +394,11 @@ class TrackerState(object):
             measurements.append(measured_power)
             delay = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS
             time.sleep(delay)
+
+        measurements = remove_outliers(measurements)
+
+        if first_move and len(measurements) > 0:
+            self.start_of_scan = sum(measurements) / len(measurements)
 
         return measurements
 
@@ -384,8 +420,10 @@ class TrackerState(object):
             read(state)
 
         motor_off(channel)
-        self.pos = 0
 
+        state.pos = 0
+        state.start_of_scan = None
+        METRICS.setEfficiency(None)
 
 
 if __name__ == "__main__":

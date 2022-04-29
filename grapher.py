@@ -187,8 +187,8 @@ class DataFetcherThread(threading.Thread):
         self.start()
 
         self.liveData = RandomTestData()
-        self.liveData = LiveData()
         self.liveData = LiveData(local=True)
+        self.liveData = LiveData()
 
     def run(self):
         while (True):
@@ -323,6 +323,7 @@ def main():
             watts = trackerData["value"]
             mode = trackerData["mode"]
             pos = trackerData["pos"]
+            efficiency_pct = trackerData.get("efficiency_pct")
 
             value = (watts / LiveData.MAX_VALUE) * background.get_height() * len(LEVELS)
             offset, level = levelChart.get_offset(value)
@@ -355,19 +356,28 @@ def main():
 
             # put text on the background
             if pygame.font and watts:
+                # Watts
                 font = pygame.font.Font(GRAPHER_FONT, 250)
                 text = "{}W".format(int(watts))
-
-                textSurf = font.render(text, True, TEXT_COLOR)
-
-                text_width = textSurf.get_width()
-
-                textpos = textSurf.get_rect(
+                wattsTextSurf = font.render(text, True, TEXT_COLOR)
+                text_width = wattsTextSurf.get_width()
+                wattsTextPos = wattsTextSurf.get_rect(
                     centery=background.get_height() / 2,
                     x=(background.get_width() - text_width)
                 )
+                background.blit(wattsTextSurf, wattsTextPos)
 
-                background.blit(textSurf, textpos)
+                # Efficiency
+                if efficiency_pct is not None:
+                    font = pygame.font.Font(GRAPHER_FONT, 48)
+                    text = "Gain: %d%%" % (efficiency_pct - 100)
+                    effTextSurf = font.render(text, True, TEXT_COLOR)
+                    text_width = effTextSurf.get_width()
+                    textpos = effTextSurf.get_rect(
+                        centery=(background.get_height() / 2) + (wattsTextPos.h / 2),
+                        x=(background.get_width() - text_width)
+                    )
+                    background.blit(effTextSurf, textpos)
 
             if mode.startswith(MODE_HILL_CLIMB):
                 dot_color = HILL_CLIMB_DOT
