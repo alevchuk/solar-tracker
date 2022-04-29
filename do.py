@@ -192,20 +192,24 @@ def read(state):
             voltage_range=ina.RANGE_32V,
     )
 
-    while (not ina.is_conversion_ready()):
-        print("INA Conversion not ready, sleeping for 100 ms")
-        time.sleep(0.1)
+    while True:
+        if not ina.is_conversion_ready():
+            print("INA Conversion not ready, sleeping for 100ms")
+            time.sleep(0.1)
+            continue
 
-    try:
-        measured_power = ina.power()  # Power in milliwatts
-        #pretty_print(measured_power)
+        try:
+            measured_power = ina.power()  # Power in milliwatts
+            #pretty_print(measured_power)
 
-        METRICS.setValue(measured_power / 1000)
-        METRICS.setPos(state.pos)
+            METRICS.setValue(measured_power / 1000)
+            METRICS.setPos(state.pos)
 
-        return measured_power
-    except DeviceRangeError as e:
-        print("Current overflow")
+            return measured_power
+        except DeviceRangeError as e:
+            print("Current overflow, sleeping for 100ms")
+            time.sleep(0.1)
+
 
 
 def hill_climb(state):
@@ -428,7 +432,7 @@ class TrackerState(object):
 
 if __name__ == "__main__":
     state = TrackerState()
-    scan_every_n_moves = 100
+    scan_every_n_moves = 20
     n = 0
     while(True):
         if n % scan_every_n_moves == 0:
