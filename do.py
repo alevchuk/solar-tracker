@@ -334,6 +334,7 @@ class TrackerState(object):
         self.improvement_history = []
         self.attemted_direction = "ext"
         self.pos = 0
+        self.pos_remainder = 0
         self.start_of_scan = None
 
     def updateEfficiency(self, new_value):
@@ -341,29 +342,41 @@ class TrackerState(object):
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
 
+    def _posExt(self):
+        self.pos_remainder += 1
+        if self.pos_remainder == MEASURE_MOVE_RATIO:
+            self.pos += 1
+            self.pos_remainder = 0
+
+    def _posRet(self):
+        self.pos_remainder -= 1
+        if self.pos_remainder == -MEASURE_MOVE_RATIO:
+            self.pos -= 1
+            self.pos_remainder = 0
+
     def hillClimbRet(self):
         if self.pos <= 0:
             return
 
         try:
-            move_arm(RET_CHANNEL, DELAY_BETWEEN_MOVES)
+            move_arm(RET_CHANNEL, DELAY_BETWEEN_MEASUREMENTS)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self.pos -= 1
+            self._posRet()
     
     def hillClimbExt(self):
         if self.pos >= SCAN_NUM_MOVES:
             return
 
         try:
-            move_arm(EXT_CHANNEL, DELAY_BETWEEN_MOVES)
+            move_arm(EXT_CHANNEL, DELAY_BETWEEN_MEASUREMENTS)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self.pos += 1
+            self._posExt()
 
     def _moveMeasure(self, ret):
         measurements = []
@@ -398,7 +411,7 @@ class TrackerState(object):
         measurements = remove_outliers(measurements)
 
         if first_move and len(measurements) > 0:
-            self.start_of_scan = sum(measurements) / len(measurements)
+            self.start_of_scan = max(measurements)
 
         return measurements
 
@@ -428,7 +441,7 @@ class TrackerState(object):
 
 if __name__ == "__main__":
     state = TrackerState()
-    scan_every_n_moves = 20
+    scan_every_n_moves = 50
     n = 0
     while(True):
         if n % scan_every_n_moves == 0:

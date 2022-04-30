@@ -349,7 +349,7 @@ def main():
 
             if mode.startswith(MODE_HILL_CLIMB):
                 dot_color = HILL_CLIMB_LEVELS[level]
-                draw_dot(pos, bar_height, bar_width, dot_color, radius=(bar_width * 2), surf=bar_dot_chart)
+                draw_dot(pos, bar_height, bar_width, dot_color, radius=bar_width, surf=bar_dot_chart)
 
             # put the dot chart on the background
             background.blit(bar_dot_chart, (0, 0))
@@ -370,7 +370,7 @@ def main():
                 # Efficiency
                 if efficiency_pct is not None:
                     font = pygame.font.Font(GRAPHER_FONT, 48)
-                    text = "Gain: %d%%" % (efficiency_pct - 100)
+                    text = "gain %d%%" % (efficiency_pct - 100)
                     effTextSurf = font.render(text, True, TEXT_COLOR)
                     text_width = effTextSurf.get_width()
                     textpos = effTextSurf.get_rect(
@@ -379,9 +379,10 @@ def main():
                     )
                     background.blit(effTextSurf, textpos)
 
+            # latest dot
             if mode.startswith(MODE_HILL_CLIMB):
                 dot_color = HILL_CLIMB_DOT
-                draw_dot(pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width * 3))
+                draw_dot(pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width+1))
 
             # Draw Everything
             screen.blit(background, (0, 0))
