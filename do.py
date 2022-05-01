@@ -36,7 +36,7 @@ NUM_SAMPLES = 3
 
 OPTIMA_SAMPLES = 8
 
-SCAN_SLEEP = 20
+SCAN_SLEEP = 30
 SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
 HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 # Also:
@@ -44,6 +44,7 @@ HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 TOTAL_POSITIONS = SCAN_NUM_MOVES * HILL_CLIMB_MULT
 SCAN_MOVES_DELAY = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan
 HILL_CLIMB_MOVES_DELAY = SCAN_SLEEP / TOTAL_POSITIONS  # during hill climbing
+
 
 class Metrics(object):
     PORT = 9732
@@ -177,33 +178,66 @@ def pretty_print(measured_power):
     print("*" * int(term_width * ratio))
 
 
-def read(state):
-    # Instantiate the ina object with the above constants
-    ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS, address=0x40)
-    # Configure the object with the expected bus voltage
-    # (either up to 16V or up to 32V with .RANGE_32V)
-    # Also, configure the gain to be GAIN_2_80MW for the above example
-    ina.configure(
-            voltage_range=ina.RANGE_32V,
-    )
+LAST_SENSOR_READ = None
 
-    while True:
-        #if not ina.is_conversion_ready():
-        #    print("INA Conversion not ready, sleeping for 100ms")
-        #    time.sleep(0.1)
-        #    continue
-        try:
-            measured_power = ina.power()  # Power in milliwatts
-            #pretty_print(measured_power)
+class SensorFetcherThread(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.start()
+
+        self.last_sensor_read = None
+
+    def read(self, state):
+        if self.last_sensor_read is None:
+            return None
+        else:
+            last = self.last_sensor_read.copy()
+            age = time.time() - last['read_at']
+            measured_power = last['value']
 
             METRICS.setValue(measured_power / 1000)
             METRICS.setPos(state.pos)
 
+            if age > MEASURE_SLEEP:
+                return None
+
             return measured_power
-        except DeviceRangeError as e:
-            print("Current overflow, sleeping for 100ms")
+
+    def _read(self):
+        # Instantiate the ina object with the above constants
+        ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS, address=0x40)
+        # Configure the object with the expected bus voltage
+        # (either up to 16V or up to 32V with .RANGE_32V)
+        # Also, configure the gain to be GAIN_2_80MW for the above example
+        ina.configure(voltage_range=ina.RANGE_32V)
+
+        while True:
+            if not ina.is_conversion_ready():
+                print("INA Conversion not ready, sleeping for 100ms")
+                time.sleep(0.1)
+                continue
+
+            try:
+                measured_power = ina.power()  # Power in milliwatts
+                return measured_power
+            except DeviceRangeError as e:
+                print("Current overflow, sleeping for 100ms")
+            except Exception as e:
+                print("Exception when reading from INA, {}".format(e))
+
             time.sleep(0.1)
 
+
+    def run(self):
+        while (True):
+            value = self._read()
+
+            self.last_sensor_read = {'value': value, 'read_at': time.time()}
+            time.sleep(MEASURE_SLEEP / 2)
+
+# Run in the background
+LAST_SENSOR_READ = SensorFetcherThread()
 
 
 def hill_climb(state):
@@ -212,7 +246,9 @@ def hill_climb(state):
     improving_list = []
     for attempt in range(NUM_SAMPLES):
         improving = 0
-        power_before = read(state)
+        power_before = None
+        while (power_before is None):
+            power_before = LAST_SENSOR_READ.read(state)
         state.updateEfficiency(power_before)
 
         # Try
@@ -224,7 +260,9 @@ def hill_climb(state):
             state.hillClimbExt()
 
         time.sleep(MEASURE_SLEEP)
-        power_after = read(state)
+        power_after = None
+        while (power_after is None):
+            power_after = LAST_SENSOR_READ.read(state)
         state.updateEfficiency(power_after)
 
         METRICS.setMode(MODE_HILL_CLIMB)
@@ -306,7 +344,7 @@ def scan(state):
     METRICS.setMode(MODE_SCAN_RET)
     for _ in range(SCAN_NUM_MOVES):
         measurements = state.moveMeasure(ret=True)
-        print(len(measurements))
+        print("Got back {} measurements".format(len(measurements)))
 
         if hill_pos == state.pos and len(measurements) > 0:
             found_hill = True
@@ -318,9 +356,7 @@ def scan(state):
         pretty_print(max_measured_power2)
         print()
     else:
-        print("Hill NOT found! Was looking for:")
-        pretty_print(max_measured_power2)
-        print()
+        print("Hill NOT found! Was looking for position: {}".format(hill_pos))
 
     return found_hill
 
@@ -349,7 +385,7 @@ class TrackerState(object):
             GPIO.cleanup()
         else:
             self.pos -= 1
-    
+
     def hillClimbExt(self):
         if self.pos >= SCAN_NUM_MOVES:
             return
@@ -380,8 +416,10 @@ class TrackerState(object):
         measure_move_delay = SCAN_MOVES_DELAY / num_moves
 
         for _ in range(int(num_moves / 2)):
-            measured_power = read(state)
-            measurements.append(measured_power)
+            measured_power = LAST_SENSOR_READ.read(state)
+            if measured_power is not None:
+                measurements.append(measured_power)
+
             time.sleep(measure_move_delay / 2)
             if ret:
                 self.pos -= 1
@@ -391,8 +429,9 @@ class TrackerState(object):
         motor_off(channel)
 
         for _ in range(int(num_moves / 2)):
-            measured_power = read(state)
-            measurements.append(measured_power)
+            measured_power = LAST_SENSOR_READ.read(state)
+            if measured_power is not None:
+                measurements.append(measured_power)
             time.sleep(measure_move_delay / 2)
 
         measurements = remove_outliers(measurements)
@@ -426,6 +465,7 @@ if __name__ == "__main__":
     state = TrackerState()
     scan_every_n_moves = 50
     n = 0
+    time.sleep(MEASURE_SLEEP)  # let reader thread get it's first measurment
     while(True):
         if n % scan_every_n_moves == 0:
             found = scan(state)
