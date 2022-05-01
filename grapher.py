@@ -133,7 +133,7 @@ class LiveData(object):
             raise LiveDataError("Unknown exception: {}".format(msg))
 
 
-        if data["age"] > 5:
+        if data["age"] > 60:
             raise LiveDataStale("Age is {} seconds".format(data["age"]))
 
         return data
@@ -229,19 +229,20 @@ def main():
     pygame.display.init()
     pygame.font.init()
     screen = pygame.display.set_mode()
-    w = screen.get_width()
-    h = screen.get_height()
 
     print("[[[[[[[[[ Screen size: {} ]]]]]]]]]".format(screen.get_size()))
+    # my device scereen size is 800 x 480
+    SCREEN_W = 800
+    SCREEN_H = 240  # half height
     pygame.mouse.set_visible(False)
 
     # Create The Background
-    background = pygame.Surface(screen.get_size())
+    background = pygame.Surface((SCREEN_W, SCREEN_H))
     background = background.convert()
 
     # Foreground Surface
-    FG_W = 797
-    FG_H = 270
+    FG_W = SCREEN_W - 3
+    FG_H = SCREEN_H * 0.4 - 1  # foreground takes bottom 40%
     fgSurf = pygame.Surface((FG_W, FG_H))
     fgSurf = fgSurf.convert()
     fgSurf.fill(BG_COLOR)
@@ -255,13 +256,13 @@ def main():
     bar_dot_chart = bar_dot_chart.convert()
 
     # Surface 3 (print errors)
-    errSurf = pygame.Surface(screen.get_size())
+    errSurf = pygame.Surface((SCREEN_W, SCREEN_H))
     errSurf = errSurf.convert()
     errSurf.fill(BG_COLOR)
 
     # Zoom Surface
-    ZOOM_W = 300
-    ZOOM_H = 200
+    ZOOM_H = SCREEN_H * 0.4 # zoom window is on the top 40%
+    ZOOM_W = ZOOM_H  # zoom window is sqaure
     zoomSurf = pygame.Surface((ZOOM_W, ZOOM_H))
     zoomSurf = errSurf.convert()
     zoomSurf.fill(BG_COLOR)
@@ -318,7 +319,7 @@ def main():
 
             # put text of the exception on the errSurf
             if pygame.font:
-                font = pygame.font.Font(GRAPHER_FONT, 32)
+                font = pygame.font.Font(GRAPHER_FONT, 16)
                 text = str(trackerData["exception"])
                 textLines = []
                 terminal_width = 40
@@ -436,30 +437,30 @@ def main():
             pygame.draw.rect(fgSurf, pygame.Color("white"), (FG_W - 1, 0, FG_W, FG_H))
             pygame.draw.rect(fgSurf, pygame.Color("white"), (0, FG_H -1, FG_W, FG_H))
 
-            background.blit(fgSurf, (0, h - FG_H))
+            background.blit(fgSurf, (0, SCREEN_H - FG_H))
 
             # put text on the background
             if pygame.font and watts:
                 # Watts
-                font = pygame.font.Font(GRAPHER_FONT, 120)
+                font = pygame.font.Font(GRAPHER_FONT, 60)
                 text = "{}W".format(int(watts))
                 wattsTextSurf = font.render(text, True, TEXT_COLOR)
                 text_width = wattsTextSurf.get_width()
                 wattsTextPos = wattsTextSurf.get_rect(
                     y=5,
-                    x=(w - text_width)
+                    x=(SCREEN_W - text_width)
                 )
                 background.blit(wattsTextSurf, wattsTextPos)
 
                 # Efficiency
                 if efficiency_pct is not None:
-                    font = pygame.font.Font(GRAPHER_FONT, 48)
+                    font = pygame.font.Font(GRAPHER_FONT, 56)
                     text = "gain %d%%" % (efficiency_pct - 100)
                     effTextSurf = font.render(text, True, TEXT_COLOR)
                     text_width = effTextSurf.get_width()
                     textpos = effTextSurf.get_rect(
                         y=(5 + wattsTextPos.h),
-                        x=(w - text_width)
+                        x=(SCREEN_W - text_width)
                     )
                     background.blit(effTextSurf, textpos)
 
