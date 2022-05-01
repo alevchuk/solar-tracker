@@ -19,7 +19,7 @@ try:
 except OSError:
     pass
 
-DATA_FETCH_PERIOD_MS = 250  # milliseconds
+DATA_FETCH_PERIOD_MS = 100  # milliseconds
 HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 
 MODE_HILL_CLIMB = "hill-climb"
@@ -29,6 +29,7 @@ MODE_SCAN_RESET = "scan-reset"
 MODE_SCAN_EXT = "scan-ext"
 MODE_SCAN_RET = "scan-ret"
 
+ZOOM_LEVEL = 3
 BG_COLOR = pygame.Color("#000000")
 TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
@@ -230,6 +231,8 @@ def main():
     background = pygame.Surface(screen.get_size())
     background = background.convert()
     background.fill(BG_COLOR)
+    w = background.get_width()
+    h = background.get_height()
 
     # Surface 1 (bars only)
     bar_chart = pygame.Surface(screen.get_size())
@@ -251,7 +254,6 @@ def main():
     zoomSurf = errSurf.convert()
     zoomSurf.fill(BG_COLOR)
 
-
     # Display The Background
     screen.blit(background, (0, 0))
 
@@ -263,6 +265,7 @@ def main():
     video_start = time.time()
 
     first_scan_ext = True
+    first_hill_climb = True
 
     # Main Loop
     done = False
@@ -355,13 +358,15 @@ def main():
                     draw_bar(pos, level, bar_height, bar_width, bar_color, i)
 
             if mode.startswith(MODE_HILL_CLIMB):
-                w = background.get_width()
-                h = background.get_height()
+                # zoom chart
+                zoom_surf_size = (w * ZOOM_LEVEL, h * ZOOM_LEVEL)
+                if first_hill_climb:
+                    zoomedUncroppedSurf = pygame.transform.scale(bar_chart, zoom_surf_size)
 
                 dot_x = pos * bar_width
                 dot_y = bar_height
 
-                # historical dot on the main chart
+                # main chart: historical dot
                 dot_color = HILL_CLIMB_LEVELS[level]
                 draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=5)
 
@@ -372,25 +377,33 @@ def main():
                 dot_color = HILL_CLIMB_DOT
                 draw_dot(dot_x, dot_y, bar_width, dot_color, surf=background, radius=10)
 
-                # zoom chart
-                zoom_level = 3
-                size = (w * zoom_level, h * zoom_level)
-                x_offset = (0.5 * ZOOM_W) - (dot_x * zoom_level)
-                y_offset = (0.5 * ZOOM_H) - ((h - dot_y) * zoom_level)
+                x_offset = (0.5 * ZOOM_W) - (dot_x * ZOOM_LEVEL)
+                y_offset = (0.5 * ZOOM_H) - ((h - dot_y) * ZOOM_LEVEL)
                 offset = (x_offset, y_offset)
-                zoomed_surf_tmp = pygame.transform.scale(bar_dot_chart, size)
+
+                # zoom chart: historical dot
+                dot_color = HILL_CLIMB_LEVELS[level]
+                draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, bar_width * ZOOM_LEVEL, dot_color,
+                    surf=zoomedUncroppedSurf, radius=5)
+
                 zoomSurf.fill(BG_COLOR)
-                zoomSurf.blit(zoomed_surf_tmp, offset, (0, 0, 0 - x_offset + ZOOM_W, 0 - y_offset + ZOOM_H))
+                zoomSurf.blit(zoomedUncroppedSurf, offset, (0, 0, 0 - x_offset + ZOOM_W, 0 - y_offset + ZOOM_H))
+
+                # zoom chart: border
                 pygame.draw.rect(zoomSurf, pygame.Color("red"), (0, 0, 1, ZOOM_H))
                 pygame.draw.rect(zoomSurf, pygame.Color("red"), (0, 0, ZOOM_W, 1))
                 pygame.draw.rect(zoomSurf, pygame.Color("red"), (ZOOM_W - 1, 0, ZOOM_W, ZOOM_H))
                 pygame.draw.rect(zoomSurf, pygame.Color("red"), (0, ZOOM_H -1, ZOOM_W, ZOOM_H))
+
                 background.blit(zoomSurf, (0, 0), (0, 0, ZOOM_W, ZOOM_H))
 
                 # since we're zoomed and panned, just draw this in the middle
-                draw_dot(ZOOM_W / 2, h - (ZOOM_H / 2), bar_width, HILL_CLIMB_DOT, surf=background, radius=15)
+                draw_dot(ZOOM_W / 2, h - (ZOOM_H / 2), bar_width, HILL_CLIMB_DOT, surf=background, radius=8)
+
+                first_hill_climb = False
             else:
                 background.blit(bar_dot_chart, (0, 0))
+                first_hill_climb = True
 
             # put text on the background
             if pygame.font and watts:
