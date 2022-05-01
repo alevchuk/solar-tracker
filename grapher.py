@@ -20,6 +20,7 @@ except OSError:
     pass
 
 DATA_FETCH_PERIOD_MS = 250  # milliseconds
+HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
@@ -167,13 +168,10 @@ def draw_bar(pos, level, bar_height, bar_width, bar_color, chart):
     ## shift
     #chart.blit(chart, (-bar_width, 0))
 
-def draw_dot(pos, bar_height, bar_width, dot_color, surf, radius):
+def draw_dot(x, y, bar_width, dot_color, surf, radius):
     # put the bar on the chart
-    bar = pygame.Rect(pos * bar_width, surf.get_height() - bar_height, bar_width, surf.get_height())
-    center = (
-        pos * bar_width,
-        surf.get_height() - bar_height
-    )
+    bar = pygame.Rect(x, surf.get_height() - y, bar_width, surf.get_height())
+    center = (x, surf.get_height() - y)
     pygame.draw.circle(surf, dot_color, center, radius)
 
 
@@ -221,6 +219,7 @@ def main():
     a loop until the function returns."""
     # Initialize Everything
     # pygame.init() ## commented out - don't initialize sound to avoid ALSA warnings "underrun occurred"
+
     pygame.display.init()
     pygame.font.init()
     screen = pygame.display.set_mode()
@@ -244,6 +243,14 @@ def main():
     errSurf = pygame.Surface(screen.get_size())
     errSurf = errSurf.convert()
     errSurf.fill(BG_COLOR)
+
+    # Zoom Surface
+    ZOOM_W = 300
+    ZOOM_H = 200
+    zoomSurf = pygame.Surface((ZOOM_W, ZOOM_H))
+    zoomSurf = errSurf.convert()
+    zoomSurf.fill(BG_COLOR)
+
 
     # Display The Background
     screen.blit(background, (0, 0))
@@ -322,14 +329,14 @@ def main():
         else:
             watts = trackerData["value"]
             mode = trackerData["mode"]
-            pos = trackerData["pos"]
+            pos = trackerData["pos"] / HILL_CLIMB_MULT
             efficiency_pct = trackerData.get("efficiency_pct")
 
             value = (watts / LiveData.MAX_VALUE) * background.get_height() * len(LEVELS)
             offset, level = levelChart.get_offset(value)
             bar_height = offset
             bar_color = LEVELS[level]
-            bar_width = 5
+            bar_width = 10
 
             if mode == MODE_SCAN_EXT:
                 if first_scan_ext:
@@ -348,11 +355,42 @@ def main():
                     draw_bar(pos, level, bar_height, bar_width, bar_color, i)
 
             if mode.startswith(MODE_HILL_CLIMB):
-                dot_color = HILL_CLIMB_LEVELS[level]
-                draw_dot(pos, bar_height, bar_width, dot_color, radius=bar_width, surf=bar_dot_chart)
+                w = background.get_width()
+                h = background.get_height()
 
-            # put the dot chart on the background
-            background.blit(bar_dot_chart, (0, 0))
+                dot_x = pos * bar_width
+                dot_y = bar_height
+
+                # historical dot on the main chart
+                dot_color = HILL_CLIMB_LEVELS[level]
+                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=5)
+
+                # main chart
+                background.blit(bar_dot_chart, (0, 0))
+
+                # latest dot
+                dot_color = HILL_CLIMB_DOT
+                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=background, radius=10)
+
+                # zoom chart
+                zoom_level = 3
+                size = (w * zoom_level, h * zoom_level)
+                x_offset = (0.5 * ZOOM_W) - (dot_x * zoom_level)
+                y_offset = (0.5 * ZOOM_H) - ((h - dot_y) * zoom_level)
+                offset = (x_offset, y_offset)
+                zoomed_surf_tmp = pygame.transform.scale(bar_dot_chart, size)
+                zoomSurf.fill(BG_COLOR)
+                zoomSurf.blit(zoomed_surf_tmp, offset, (0, 0, 0 - x_offset + ZOOM_W, 0 - y_offset + ZOOM_H))
+                pygame.draw.rect(zoomSurf, pygame.Color("red"), (0, 0, 1, ZOOM_H))
+                pygame.draw.rect(zoomSurf, pygame.Color("red"), (0, 0, ZOOM_W, 1))
+                pygame.draw.rect(zoomSurf, pygame.Color("red"), (ZOOM_W - 1, 0, ZOOM_W, ZOOM_H))
+                pygame.draw.rect(zoomSurf, pygame.Color("red"), (0, ZOOM_H -1, ZOOM_W, ZOOM_H))
+                background.blit(zoomSurf, (0, 0), (0, 0, ZOOM_W, ZOOM_H))
+
+                # since we're zoomed and panned, just draw this in the middle
+                draw_dot(ZOOM_W / 2, h - (ZOOM_H / 2), bar_width, HILL_CLIMB_DOT, surf=background, radius=15)
+            else:
+                background.blit(bar_dot_chart, (0, 0))
 
             # put text on the background
             if pygame.font and watts:
@@ -379,10 +417,6 @@ def main():
                     )
                     background.blit(effTextSurf, textpos)
 
-            # latest dot
-            if mode.startswith(MODE_HILL_CLIMB):
-                dot_color = HILL_CLIMB_DOT
-                draw_dot(pos, bar_height, bar_width, dot_color, surf=background, radius=(bar_width+1))
 
             # Draw Everything
             screen.blit(background, (0, 0))

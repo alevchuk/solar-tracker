@@ -16,15 +16,15 @@ MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
 
-SCAN_SLEEP = 20
-SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
-MEASURE_MOVE_RATIO = 10  # scan has this many meanusments per move
+SCAN_SLEEP = 8
+SCAN_NUM_MOVES = 25 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
+HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 # Also:
 # - hill climbing takes one measurement per move
 # - scan has finer granularity than hill climbing
-SCAN_NUM_MEASUREMENTS = SCAN_NUM_MOVES * MEASURE_MOVE_RATIO
-DELAY_BETWEEN_MOVES = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan and hill climbing
-DELAY_BETWEEN_MEASUREMENTS = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS  # during scan
+TOTAL_POSITIONS = SCAN_NUM_MOVES * HILL_CLIMB_MULT
+DELAY_BETWEEN_SCAN_MOVES = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan
+DELAY_BETWEEN_CLIMB_MOVES = SCAN_SLEEP / TOTAL_POSITIONS  # during hill climbing
 
 
 class RandomTestData(object):
@@ -65,16 +65,13 @@ class RandomTestData(object):
         self.update_mode()
 
         delta = random.random() - 0.5
-        if self.watts_direction == "up":
-            if delta > 0:
-                if not self.mode.startswith(MODE_HILL_CLIMB):
-                    delta *= 2
-        else:
-            if delta < 0:
-                if not self.mode.startswith(MODE_HILL_CLIMB):
-                    delta *= 2
+
+        # smaller value fluctuations during hill climbing
+        if self.mode.startswith(MODE_HILL_CLIMB):
+           delta /= HILL_CLIMB_MULT
 
         new_value = self.prev_value + delta * 5
+
         if new_value < 0:
             new_value = 0
             self.watts_direction = "up"
@@ -95,21 +92,20 @@ class RandomTestData(object):
             if self.start_of_scan is not None and self.start_of_scan != 0:
                 efficiency_pct = (new_value / self.start_of_scan) * 100
 
-        if self.mode == MODE_HILL_CLIMB_EXT:
-            self.pos += 1
-        elif self.mode == MODE_HILL_CLIMB_RET:
-            self.pos -= 1
-
-        if self.num_measurments % MEASURE_MOVE_RATIO == 0:
-            if self.mode == MODE_SCAN_EXT:
+            if self.mode == MODE_HILL_CLIMB_EXT:
                 self.pos += 1
-                if self.pos == 1:
-                    self.start_of_scan = new_value
-            elif self.mode == MODE_SCAN_RET:
+            elif self.mode == MODE_HILL_CLIMB_RET:
                 self.pos -= 1
-
-        if self.mode == MODE_SCAN_RESET:
+        elif self.mode == MODE_SCAN_RESET:
             self.pos = 0
+        else:
+            if self.mode == MODE_SCAN_EXT:
+                if self.pos == 0:
+                    self.start_of_scan = new_value
+                self.pos += HILL_CLIMB_MULT
+            elif self.mode == MODE_SCAN_RET:
+                self.pos -= HILL_CLIMB_MULT
+
 
         retval = {
             'value': new_value,
@@ -191,9 +187,9 @@ class MetricsListenerThread(threading.Thread):
 if __name__ == "__main__":
     generator = RandomTestData()
     while True:
-        if generator.mode in [MODE_SCAN_EXT, MODE_SCAN_RET]:
-            time.sleep(DELAY_BETWEEN_MEASUREMENTS)
+        if generator.mode.startswith(MODE_HILL_CLIMB):
+            time.sleep(DELAY_BETWEEN_CLIMB_MOVES)
         else:
-            time.sleep(DELAY_BETWEEN_MOVES)
+            time.sleep(DELAY_BETWEEN_SCAN_MOVES)
 
         METRICS.setData(generator.next())

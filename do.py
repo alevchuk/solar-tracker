@@ -38,13 +38,12 @@ optima_samples = 8
 
 SCAN_SLEEP = 20
 SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
-MEASURE_MOVE_RATIO = 10  # scan has this many meanusments per move
+HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 # Also:
 # - hill climbing takes one measurement per move
-# - scan has finer granularity than hill climbing
-SCAN_NUM_MEASUREMENTS = SCAN_NUM_MOVES * MEASURE_MOVE_RATIO
-DELAY_BETWEEN_MOVES = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan and hill climbing
-DELAY_BETWEEN_MEASUREMENTS = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS  # during scan
+TOTAL_POSITIONS = SCAN_NUM_MOVES * HILL_CLIMB_MULT
+SCAN_MOVES_DELAY = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan
+HILL_CLIMB_MOVES_DELAY = SCAN_SLEEP / TOTAL_POSITIONS  # during hill climbing
 
 class Metrics(object):
     PORT = 9732
@@ -191,11 +190,10 @@ def read(state):
     )
 
     while True:
-        if not ina.is_conversion_ready():
-            print("INA Conversion not ready, sleeping for 100ms")
-            time.sleep(0.1)
-            continue
-
+        #if not ina.is_conversion_ready():
+        #    print("INA Conversion not ready, sleeping for 100ms")
+        #    time.sleep(0.1)
+        #    continue
         try:
             measured_power = ina.power()  # Power in milliwatts
             #pretty_print(measured_power)
@@ -227,7 +225,7 @@ def hill_climb(state):
             METRICS.setMode(MODE_HILL_CLIMB_EXT)
             state.hillClimbExt()
 
-        time.sleep(0.2)
+        time.sleep(1)
         power_after = read(state)
         state.updateEfficiency(power_after)
 
@@ -334,7 +332,6 @@ class TrackerState(object):
         self.improvement_history = []
         self.attemted_direction = "ext"
         self.pos = 0
-        self.pos_remainder = 0
         self.start_of_scan = None
 
     def updateEfficiency(self, new_value):
@@ -342,41 +339,29 @@ class TrackerState(object):
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
 
-    def _posExt(self):
-        self.pos_remainder += 1
-        if self.pos_remainder == MEASURE_MOVE_RATIO:
-            self.pos += 1
-            self.pos_remainder = 0
-
-    def _posRet(self):
-        self.pos_remainder -= 1
-        if self.pos_remainder == -MEASURE_MOVE_RATIO:
-            self.pos -= 1
-            self.pos_remainder = 0
-
     def hillClimbRet(self):
         if self.pos <= 0:
             return
 
         try:
-            move_arm(RET_CHANNEL, DELAY_BETWEEN_MEASUREMENTS)
+            move_arm(RET_CHANNEL, HILL_CLIMB_MOVES_DELAY)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self._posRet()
+            self.pos -= 1
     
     def hillClimbExt(self):
         if self.pos >= SCAN_NUM_MOVES:
             return
 
         try:
-            move_arm(EXT_CHANNEL, DELAY_BETWEEN_MEASUREMENTS)
+            move_arm(EXT_CHANNEL, HILL_CLIMB_MOVES_DELAY)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self._posExt()
+            self.pos += 1
 
     def _moveMeasure(self, ret):
         measurements = []
@@ -384,29 +369,32 @@ class TrackerState(object):
 
         if ret:
             channel = RET_CHANNEL
-            self.pos -= 1
         else:
             channel = EXT_CHANNEL
-            self.pos += 1
-            if self.pos == 1:
+            if self.pos == 0:
                 first_move = True
 
         setup(channel)
         motor_on(channel)
 
-        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+        num_moves = HILL_CLIMB_MULT
+        measure_move_delay = SCAN_MOVES_DELAY / num_moves
+
+        for _ in range(int(num_moves / 2)):
             measured_power = read(state)
             measurements.append(measured_power)
-            delay = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS
-            time.sleep(delay)
+            time.sleep(measure_move_delay / 2)
+            if ret:
+                self.pos -= 1
+            else:
+                self.pos += 1
 
         motor_off(channel)
 
-        for _ in range(int(MEASURE_MOVE_RATIO / 2)):
+        for _ in range(int(num_moves / 2)):
             measured_power = read(state)
             measurements.append(measured_power)
-            delay = SCAN_SLEEP / SCAN_NUM_MEASUREMENTS
-            time.sleep(delay)
+            time.sleep(measure_move_delay / 2)
 
         measurements = remove_outliers(measurements)
 
