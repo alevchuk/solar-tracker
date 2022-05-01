@@ -19,6 +19,7 @@ from http.server import HTTPServer
 import logging
 logging.getLogger("imported_module").setLevel(logging.WARNING)
 
+import statistics
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
@@ -269,10 +270,10 @@ def remove_outliers(measurements):
     cutoff = 1.2
     no_outliers = []
     if len(measurements) > 0:
-        avg_measured_power = sum(measurements) / len(measurements)
-        delta = avg_measured_power * cutoff - avg_measured_power
+        median_measurement = statistics.median(measurements)
+        delta = median_measurement * cutoff - median_measurement
         for i in measurements:
-            if i < avg_measured_power - delta or i > avg_measured_power + delta:
+            if i < median_measurement - delta or i > median_measurement + delta:
                 human_measurements = ["%.3f" % (i / 1000) for i in measurements]
                 print("OUTLIER: dropping {} from {}".format("%.3f" % (i / 1000), human_measurements))
                 continue  # ignore this measurment
@@ -308,8 +309,9 @@ def scan(state):
     METRICS.setMode(MODE_SCAN_RET)
     for _ in range(SCAN_NUM_MOVES):
         measurements = state.moveMeasure(ret=True)
+        print(len(measurements))
 
-        if hill_pos == state.pos:
+        if hill_pos == state.pos and len(measurements) > 0:
             found_hill = True
             max_measured_power2 = max(measurements)
             break
@@ -415,11 +417,7 @@ class TrackerState(object):
 
         setup(channel)
         motor_on(channel)
-        num_moves = 5
-        for _ in range(num_moves):
-            time.sleep(SCAN_SLEEP / num_moves)
-            read(state)
-
+        time.sleep(SCAN_SLEEP)
         motor_off(channel)
 
         state.pos = 0
