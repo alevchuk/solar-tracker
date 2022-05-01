@@ -29,13 +29,12 @@ MODE_SCAN_RET = "scan-ret"
 
 RET_CHANNEL = 20
 EXT_CHANNEL = 21
-measure_sleep = 0.6
+MEASURE_SLEEP = 0.6
 
 
-num_samples = 3
+NUM_SAMPLES = 3
 
-optima_pause = 5 * 60
-optima_samples = 8
+OPTIMA_SAMPLES = 8
 
 SCAN_SLEEP = 20
 SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
@@ -155,9 +154,7 @@ def move_arm(channel, movement_sleep):
     motor_on(channel)
     time.sleep(movement_sleep)
     motor_off(channel)
-    time.sleep(measure_sleep)
-
-
+    time.sleep(MEASURE_SLEEP)
 
 
 # Set the constants that were calculated
@@ -213,7 +210,7 @@ def hill_climb(state):
     print(state.descision_history)
 
     improving_list = []
-    for attempt in range(num_samples):
+    for attempt in range(NUM_SAMPLES):
         improving = 0
         power_before = read(state)
         state.updateEfficiency(power_before)
@@ -226,7 +223,7 @@ def hill_climb(state):
             METRICS.setMode(MODE_HILL_CLIMB_EXT)
             state.hillClimbExt()
 
-        time.sleep(1)
+        time.sleep(MEASURE_SLEEP)
         power_after = read(state)
         state.updateEfficiency(power_after)
 
@@ -262,8 +259,8 @@ def hill_climb(state):
 
 
     state.descision_history.append(state.attemted_direction)
-    if len(state.descision_history) > optima_samples:
-        state.descision_history = state.descision_history[-optima_samples:]
+    if len(state.descision_history) > OPTIMA_SAMPLES:
+        state.descision_history = state.descision_history[-OPTIMA_SAMPLES:]
 
 
 def remove_outliers(measurements):
