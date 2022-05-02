@@ -13,7 +13,10 @@ import time
 import threading
 import queue
 
-VIDEO_FRAMES_DIR = "video-frames"
+HOME = os.path.expanduser("~")
+
+
+VIDEO_FRAMES_DIR = HOME + "/video-frames"
 try:
     os.makedirs(VIDEO_FRAMES_DIR)
 except OSError:
