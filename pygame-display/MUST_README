@@ -1,0 +1,3 @@
+this needs to be located in /home/pi/pygame-display
+making a symlink works too:
+  cd /home/pi && ln -s solar-tracker/pygame-display

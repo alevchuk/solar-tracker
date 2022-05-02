@@ -264,7 +264,7 @@ def main():
     ZOOM_H = SCREEN_H * 0.4 # zoom window is on the top 40%
     ZOOM_W = ZOOM_H  # zoom window is sqaure
     zoomSurf = pygame.Surface((ZOOM_W, ZOOM_H))
-    zoomSurf = errSurf.convert()
+    zoomSurf = errSurf.convert()  # ??
     zoomSurf.fill(BG_COLOR)
 
     # Display The Background
