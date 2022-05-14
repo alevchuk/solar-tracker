@@ -272,8 +272,8 @@ def main():
     mode = None
 
     while not done:
-        # clock.tick(80)
-        # pygame.time.wait(200)
+        clock.tick(40)
+        pygame.time.wait(100)
 
         level = 0
         pos = 0
@@ -339,7 +339,7 @@ def main():
             offset, level = levelChart.get_offset(value)
             bar_height = offset
             bar_color = LEVELS[level]
-            bar_width = 10
+            bar_width = 5
 
             if mode == MODE_SCAN_EXT:
                 if first_scan_ext:
@@ -368,14 +368,14 @@ def main():
 
                 # main chart: historical dot
                 dot_color = HILL_CLIMB_LEVELS[level]
-                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=5)
+                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=7)
 
                 # main chart
                 background.blit(bar_dot_chart, (0, 0))
 
                 # latest dot
                 dot_color = HILL_CLIMB_DOT
-                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=background, radius=10)
+                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=background, radius=12)
 
                 x_offset = (0.5 * ZOOM_W) - (dot_x * ZOOM_LEVEL)
                 y_offset = (0.5 * ZOOM_H) - ((h - dot_y) * ZOOM_LEVEL)

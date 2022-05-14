@@ -31,14 +31,17 @@ RET_CHANNEL = 20
 EXT_CHANNEL = 21
 MEASURE_SLEEP = 0.6
 
-
-NUM_SAMPLES = 3
+HILL_CLIMB_NUM_SAMPLES = 3
 
 OPTIMA_SAMPLES = 8
 
-SCAN_SLEEP = 30
+SCAN_SLEEP = 15
+HILL_CLIMB_MULT = 10 
 SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
-HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
+
+#SCAN_SLEEP = 60   # scan ext takes 35s (why?) when SCAN_SLEEP = 7
+#HILL_CLIMB_MULT = 4  # resolution multiplier for hill climbing
+#SCAN_NUM_MOVES = 60 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES * HILL_CLIMB_MULT). Tip: make SCAN_SLEEP == SCAN_NUM_MOVES so each scan step is 1 second, this seems to work well
 # Also:
 # - hill climbing takes one measurement per move
 TOTAL_POSITIONS = SCAN_NUM_MOVES * HILL_CLIMB_MULT
@@ -155,7 +158,6 @@ def move_arm(channel, movement_sleep):
     motor_on(channel)
     time.sleep(movement_sleep)
     motor_off(channel)
-    time.sleep(MEASURE_SLEEP)
 
 
 # Set the constants that were calculated
@@ -205,28 +207,27 @@ class SensorFetcherThread(threading.Thread):
             return measured_power
 
     def _read(self):
-        # Instantiate the ina object with the above constants
-        ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS, address=0x40)
-        # Configure the object with the expected bus voltage
-        # (either up to 16V or up to 32V with .RANGE_32V)
-        # Also, configure the gain to be GAIN_2_80MW for the above example
-        ina.configure(voltage_range=ina.RANGE_32V)
-
         while True:
-            if not ina.is_conversion_ready():
-                print("INA Conversion not ready, sleeping for 100ms")
-                time.sleep(0.1)
-                continue
-
             try:
+                # Instantiate the ina object with the above constants
+                ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS, address=0x40)
+                # Configure the object with the expected bus voltage
+                # (either up to 16V or up to 32V with .RANGE_32V)
+                # Also, configure the gain to be GAIN_2_80MW for the above example
+                ina.configure(voltage_range=ina.RANGE_32V)
+
+                if not ina.is_conversion_ready():
+                    print("INA Conversion not ready, sleeping for 100ms")
+                    time.sleep(0.1)
+                    continue
+
                 measured_power = ina.power()  # Power in milliwatts
                 return measured_power
-            except DeviceRangeError as e:
-                print("Current overflow, sleeping for 100ms")
+
             except Exception as e:
                 print("Exception when reading from INA, {}".format(e))
 
-            time.sleep(0.1)
+            time.sleep(0.2)
 
 
     def run(self):
@@ -244,56 +245,72 @@ def hill_climb(state):
     print(state.descision_history)
 
     improving_list = []
-    for attempt in range(NUM_SAMPLES):
+    for _ in range(HILL_CLIMB_NUM_SAMPLES):
         improving = 0
         power_before = None
+
         while (power_before is None):
+            time.sleep(MEASURE_SLEEP)
             power_before = LAST_SENSOR_READ.read(state)
+
         state.updateEfficiency(power_before)
 
         # Try
         if state.attemted_direction == "ret":
             METRICS.setMode(MODE_HILL_CLIMB_RET)
-            state.hillClimbRet()
+            state.armRet()
+            print("Try Ret")
         else:
             METRICS.setMode(MODE_HILL_CLIMB_EXT)
-            state.hillClimbExt()
+            state.armExt()
+            print("Try Ext")
 
-        time.sleep(MEASURE_SLEEP)
         power_after = None
         while (power_after is None):
+            time.sleep(MEASURE_SLEEP)
             power_after = LAST_SENSOR_READ.read(state)
+
+        # print("Power before: {}   <=> Power after {}".format(power_before, power_after))
         state.updateEfficiency(power_after)
-
         METRICS.setMode(MODE_HILL_CLIMB)
-
         improving = power_after - power_before
         improving_list.append(improving)
 
         # Undo
         if state.attemted_direction == "ret":
             METRICS.setMode(MODE_HILL_CLIMB_EXT)
-            state.hillClimbExt()
+            state.armExt()
+            print("Undo Ret")
         else:
             METRICS.setMode(MODE_HILL_CLIMB_RET)
-            state.hillClimbRet()
+            state.armRet()
+            print("Undo Ext")
 
         time.sleep(0.2)
         METRICS.setMode(MODE_HILL_CLIMB)
 
-    state.improvement_history.append(sum(improving_list) / len(improving_list))
+    improving_avg = sum(improving_list) / len(improving_list)
+    state.improvement_history.append(improving_avg)
+    print("Imporvement list: {}".format([round(i, 2) for i in improving_list]))
+    print("Imporvement avg: {}".format(round(improving_avg, 3)))
+
     if sum(improving_list) >= 0:
         # Advance in favorable direction
         if state.attemted_direction == "ret":
-            state.hillClimbRet()
+            state.armRet()
+            print("Advance Ret  <------------")
         else:
-            state.hillClimbExt()
-        time.sleep(0.2)
+            state.armExt()
+            print("Advance Ext <------------")
+            time.sleep(MEASURE_SLEEP)
     else:
+        # Reverse
         if state.attemted_direction == "ret":
             state.attemted_direction = "ext"
         else:
             state.attemted_direction = "ret"
+        
+        print("Reverse to: {} <----------- X ----------".format(state.attemted_direction))
 
 
     state.descision_history.append(state.attemted_direction)
@@ -317,7 +334,7 @@ def remove_outliers(measurements):
     return no_outliers
 
 
-def scan(state):
+def doScan(state):
     """
     Returns True if the hill is found
     """
@@ -330,11 +347,12 @@ def scan(state):
     max_measured_power = 0
     hill_pos = 0
     for _ in range(SCAN_NUM_MOVES):
-        measurements = state.moveMeasure(ret=False)
-        for m in measurements:
-            if m > max_measured_power:
-                max_measured_power = m
-                hill_pos = state.pos
+        state.armExt(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT)
+        time.sleep(MEASURE_SLEEP)
+        m = LAST_SENSOR_READ.read(state)
+        if m > max_measured_power:
+            max_measured_power = m
+            hill_pos = state.pos
 
     print("Max found: %.3f W at position %d" % (max_measured_power / 1000, hill_pos))
 
@@ -343,12 +361,17 @@ def scan(state):
     measurements = None
     METRICS.setMode(MODE_SCAN_RET)
     for _ in range(SCAN_NUM_MOVES):
-        measurements = state.moveMeasure(ret=True)
-        print("Got back {} measurements".format(len(measurements)))
+        state.armRet(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT)
 
-        if hill_pos == state.pos and len(measurements) > 0:
+        # so we don't mark data as stale
+        METRICS.setValue(max_measured_power / 1000)
+        METRICS.setPos(hill_pos)
+
+
+        if hill_pos == state.pos:
             found_hill = True
-            max_measured_power2 = max(measurements)
+            time.sleep(MEASURE_SLEEP)
+            max_measured_power2 = LAST_SENSOR_READ.read(state)
             break
 
     if found_hill:
@@ -374,31 +397,34 @@ class TrackerState(object):
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
 
-    def hillClimbRet(self):
+    def armRet(self, delay=HILL_CLIMB_MOVES_DELAY):
         if self.pos <= 0:
             return
 
         try:
-            move_arm(RET_CHANNEL, HILL_CLIMB_MOVES_DELAY)
+            move_arm(RET_CHANNEL, delay)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self.pos -= 1
+            self.pos -= int(delay / HILL_CLIMB_MOVES_DELAY)
 
-    def hillClimbExt(self):
-        if self.pos >= SCAN_NUM_MOVES:
+    def armExt(self, delay=HILL_CLIMB_MOVES_DELAY):
+        if self.pos >= SCAN_NUM_MOVES * HILL_CLIMB_MULT:
             return
 
         try:
-            move_arm(EXT_CHANNEL, HILL_CLIMB_MOVES_DELAY)
+            move_arm(EXT_CHANNEL, delay)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self.pos += 1
+            #if delay == HILL_CLIMB_MOVES_DELAY:
+            #    self.pos += 2  # calibrate
+            #else:
+            self.pos += int(delay / HILL_CLIMB_MOVES_DELAY)
 
-    def _moveMeasure(self, ret):
+    def _moveMeasure_DEPRICATED(self, ret):
         measurements = []
         first_move = False
 
@@ -413,7 +439,8 @@ class TrackerState(object):
         motor_on(channel)
 
         num_moves = HILL_CLIMB_MULT
-        measure_move_delay = SCAN_MOVES_DELAY / num_moves
+
+        time.sleep(SCAN_MOVES_DELAY)
 
         for _ in range(int(num_moves / 2)):
             measured_power = LAST_SENSOR_READ.read(state)
@@ -441,9 +468,9 @@ class TrackerState(object):
 
         return measurements
 
-    def moveMeasure(self, ret=True):
+    def moveMeasure_DEPRICATED(self, ret=True):
         try:
-            return self._moveMeasure(ret)
+            return self._moveMeasure_DEPRICATED(ret)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
@@ -453,7 +480,7 @@ class TrackerState(object):
 
         setup(channel)
         motor_on(channel)
-        time.sleep(SCAN_SLEEP)
+        time.sleep(SCAN_SLEEP / 4)  # TODO: fix SCAN_SLEEP logic and remove /2
         motor_off(channel)
 
         state.pos = 0
@@ -468,9 +495,9 @@ if __name__ == "__main__":
     time.sleep(MEASURE_SLEEP)  # let reader thread get it's first measurment
     while(True):
         if n % scan_every_n_moves == 0:
-            found = scan(state)
+            found = doScan(state)
             while(not found):
-                found = scan(state)
+                found = doScan(state)
 
         hill_climb(state)
         n += 1
