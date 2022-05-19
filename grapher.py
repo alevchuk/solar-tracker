@@ -19,6 +19,8 @@ try:
 except OSError:
     pass
 
+SCAN_NUM_MOVES = 100 # must match what's in the tracker (do.py)
+
 DATA_FETCH_PERIOD_MS = 100  # milliseconds
 HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 
@@ -224,22 +226,29 @@ def main():
     pygame.display.init()
     pygame.font.init()
     screen = pygame.display.set_mode()
-    print("Screen size: {}".format(screen.get_size()))
+    w = screen.get_width()
+    h = screen.get_height()
+
+    print("[[[[[[[[[ Screen size: {} ]]]]]]]]]".format(screen.get_size()))
     pygame.mouse.set_visible(False)
 
-    # Create The Backgound
+    # Create The Background
     background = pygame.Surface(screen.get_size())
     background = background.convert()
-    background.fill(BG_COLOR)
-    w = background.get_width()
-    h = background.get_height()
+
+    # Foreground Surface
+    FG_W = 798
+    FG_H = 270
+    fgSurf = pygame.Surface((FG_W, FG_H))
+    fgSurf = fgSurf.convert()
+    fgSurf.fill(BG_COLOR)
 
     # Surface 1 (bars only)
-    bar_chart = pygame.Surface(screen.get_size())
+    bar_chart = pygame.Surface(fgSurf.get_size())
     bar_chart = bar_chart.convert()
 
     # Surface 2 (bars and dots)
-    bar_dot_chart = pygame.Surface(screen.get_size())
+    bar_dot_chart = pygame.Surface(fgSurf.get_size())
     bar_dot_chart = bar_dot_chart.convert()
 
     # Surface 3 (print errors)
@@ -259,7 +268,7 @@ def main():
 
     clock = pygame.time.Clock()
 
-    levelChart = LevelChart(h)
+    levelChart = LevelChart(FG_H)
 
     frame_num = 0
     video_start = time.time()
@@ -335,11 +344,14 @@ def main():
             pos = trackerData["pos"] / HILL_CLIMB_MULT
             efficiency_pct = trackerData.get("efficiency_pct")
 
-            value = (watts / LiveData.MAX_VALUE) * h * len(LEVELS)
+            value = (watts / LiveData.MAX_VALUE) * FG_H * len(LEVELS)
             offset, level = levelChart.get_offset(value)
             bar_height = offset
             bar_color = LEVELS[level]
-            bar_width = 5
+            bar_width = FG_W / SCAN_NUM_MOVES
+
+            # clear background
+            background.fill(BG_COLOR)
 
             if mode == MODE_SCAN_EXT:
                 if first_scan_ext:
@@ -359,7 +371,7 @@ def main():
 
             if mode.startswith(MODE_HILL_CLIMB):
                 # zoom chart
-                zoom_surf_size = (w * ZOOM_LEVEL, h * ZOOM_LEVEL)
+                zoom_surf_size = (FG_W * ZOOM_LEVEL, FG_H * ZOOM_LEVEL)
                 if first_hill_climb:
                     zoomedUncroppedSurf = pygame.transform.scale(bar_chart, zoom_surf_size)
 
@@ -371,14 +383,14 @@ def main():
                 draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=7)
 
                 # main chart
-                background.blit(bar_dot_chart, (0, 0))
+                fgSurf.blit(bar_dot_chart, (0, 0))
 
                 # latest dot
                 dot_color = HILL_CLIMB_DOT
-                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=background, radius=12)
+                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=fgSurf, radius=12)
 
                 x_offset = (0.5 * ZOOM_W) - (dot_x * ZOOM_LEVEL)
-                y_offset = (0.5 * ZOOM_H) - ((h - dot_y) * ZOOM_LEVEL)
+                y_offset = (0.5 * ZOOM_H) - ((FG_H - dot_y) * ZOOM_LEVEL)
                 offset = (x_offset, y_offset)
 
                 # zoom chart: historical dot
@@ -402,18 +414,26 @@ def main():
 
                 first_hill_climb = False
             else:
-                background.blit(bar_dot_chart, (0, 0))
+                fgSurf.blit(bar_dot_chart, (0, 0))
                 first_hill_climb = True
+
+            # foreground chart: border
+            pygame.draw.rect(fgSurf, pygame.Color("white"), (0, 0, 1, FG_H))
+            pygame.draw.rect(fgSurf, pygame.Color("white"), (0, 0, FG_W, 1))
+            pygame.draw.rect(fgSurf, pygame.Color("white"), (FG_W - 1, 0, FG_W, FG_H))
+            pygame.draw.rect(fgSurf, pygame.Color("white"), (0, FG_H -1, FG_W, FG_H))
+
+            background.blit(fgSurf, (0, h - FG_H))
 
             # put text on the background
             if pygame.font and watts:
                 # Watts
-                font = pygame.font.Font(GRAPHER_FONT, 250)
+                font = pygame.font.Font(GRAPHER_FONT, 120)
                 text = "{}W".format(int(watts))
                 wattsTextSurf = font.render(text, True, TEXT_COLOR)
                 text_width = wattsTextSurf.get_width()
                 wattsTextPos = wattsTextSurf.get_rect(
-                    centery=h / 2,
+                    y=5,
                     x=(w - text_width)
                 )
                 background.blit(wattsTextSurf, wattsTextPos)
@@ -425,7 +445,7 @@ def main():
                     effTextSurf = font.render(text, True, TEXT_COLOR)
                     text_width = effTextSurf.get_width()
                     textpos = effTextSurf.get_rect(
-                        centery=(h / 2) + (wattsTextPos.h / 2),
+                        y=(5 + wattsTextPos.h),
                         x=(w - text_width)
                     )
                     background.blit(effTextSurf, textpos)
