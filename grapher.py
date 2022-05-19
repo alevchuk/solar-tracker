@@ -173,8 +173,8 @@ def draw_bar(pos, level, bar_height, bar_width, bar_color, chart):
 
 def draw_dot(x, y, bar_width, dot_color, surf, radius):
     # put the bar on the chart
-    bar = pygame.Rect(x, surf.get_height() - y, bar_width, surf.get_height())
-    center = (x, surf.get_height() - y)
+    bar = pygame.Rect(x, y, bar_width, surf.get_height())
+    center = (x, y)
     pygame.draw.circle(surf, dot_color, center, radius)
 
 
@@ -376,7 +376,7 @@ def main():
                     zoomedUncroppedSurf = pygame.transform.scale(bar_chart, zoom_surf_size)
 
                 dot_x = pos * bar_width
-                dot_y = bar_height
+                dot_y = FG_H - bar_height
 
                 # main chart: historical dot
                 dot_color = HILL_CLIMB_LEVELS[level]
@@ -388,9 +388,19 @@ def main():
                 # latest dot
                 dot_color = HILL_CLIMB_DOT
                 draw_dot(dot_x, dot_y, bar_width, dot_color, surf=fgSurf, radius=12)
+                border_w = ZOOM_W / ZOOM_LEVEL
+                border_h = ZOOM_H / ZOOM_LEVEL
+                border_left = dot_x - border_w / 2
+                border_top = dot_y - border_h / 2
+                border_right = dot_x - border_w / 2
+                border_bottom = dot_y + border_h / 2
+                pygame.draw.rect(fgSurf, pygame.Color("red"), (border_left, border_top, 1, border_h))
+                pygame.draw.rect(fgSurf, pygame.Color("red"), (border_left, border_top, border_w, 1))
+                pygame.draw.rect(fgSurf, pygame.Color("red"), (border_left + border_w, border_top, 1, border_h))
+                pygame.draw.rect(fgSurf, pygame.Color("red"), (border_left, border_top + border_h, border_w, 1))
 
                 x_offset = (0.5 * ZOOM_W) - (dot_x * ZOOM_LEVEL)
-                y_offset = (0.5 * ZOOM_H) - ((FG_H - dot_y) * ZOOM_LEVEL)
+                y_offset = (0.5 * ZOOM_H) - (dot_y * ZOOM_LEVEL)
                 offset = (x_offset, y_offset)
 
                 # zoom chart: historical dot
@@ -410,7 +420,7 @@ def main():
                 background.blit(zoomSurf, (0, 0), (0, 0, ZOOM_W, ZOOM_H))
 
                 # since we're zoomed and panned, just draw this in the middle
-                draw_dot(ZOOM_W / 2, h - (ZOOM_H / 2), bar_width, HILL_CLIMB_DOT, surf=background, radius=8)
+                draw_dot(ZOOM_W / 2, ZOOM_H / 2, bar_width, HILL_CLIMB_DOT, surf=background, radius=8)
 
                 first_hill_climb = False
             else:
