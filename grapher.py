@@ -242,7 +242,7 @@ def main():
     bar_dot_chart = pygame.Surface(screen.get_size())
     bar_dot_chart = bar_dot_chart.convert()
 
-    # Surface 3 (pring errors)
+    # Surface 3 (print errors)
     errSurf = pygame.Surface(screen.get_size())
     errSurf = errSurf.convert()
     errSurf.fill(BG_COLOR)
@@ -259,7 +259,7 @@ def main():
 
     clock = pygame.time.Clock()
 
-    levelChart = LevelChart(background.get_height())
+    levelChart = LevelChart(h)
 
     frame_num = 0
     video_start = time.time()
@@ -335,7 +335,7 @@ def main():
             pos = trackerData["pos"] / HILL_CLIMB_MULT
             efficiency_pct = trackerData.get("efficiency_pct")
 
-            value = (watts / LiveData.MAX_VALUE) * background.get_height() * len(LEVELS)
+            value = (watts / LiveData.MAX_VALUE) * h * len(LEVELS)
             offset, level = levelChart.get_offset(value)
             bar_height = offset
             bar_color = LEVELS[level]
@@ -413,8 +413,8 @@ def main():
                 wattsTextSurf = font.render(text, True, TEXT_COLOR)
                 text_width = wattsTextSurf.get_width()
                 wattsTextPos = wattsTextSurf.get_rect(
-                    centery=background.get_height() / 2,
-                    x=(background.get_width() - text_width)
+                    centery=h / 2,
+                    x=(w - text_width)
                 )
                 background.blit(wattsTextSurf, wattsTextPos)
 
@@ -425,8 +425,8 @@ def main():
                     effTextSurf = font.render(text, True, TEXT_COLOR)
                     text_width = effTextSurf.get_width()
                     textpos = effTextSurf.get_rect(
-                        centery=(background.get_height() / 2) + (wattsTextPos.h / 2),
-                        x=(background.get_width() - text_width)
+                        centery=(h / 2) + (wattsTextPos.h / 2),
+                        x=(w - text_width)
                     )
                     background.blit(effTextSurf, textpos)
 
