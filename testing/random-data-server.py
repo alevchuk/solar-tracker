@@ -16,8 +16,8 @@ MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
 
-SCAN_SLEEP = 8
-SCAN_NUM_MOVES = 25 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
+SCAN_SLEEP = 26
+SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
 HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 # Also:
 # - hill climbing takes one measurement per move
@@ -42,6 +42,9 @@ class RandomTestData(object):
 
 
     def update_mode(self):
+        if self.mode == MODE_SCAN_RESET:
+            self.next_mode_delay = 1  # for testing no need to wait for reset
+
         if self.mode_start + self.next_mode_delay < time.time():
             if self.mode == MODE_SCAN_EXT:
                 self.next_mode_delay = SCAN_SLEEP / 2
@@ -64,13 +67,16 @@ class RandomTestData(object):
         self.num_measurments += 1
         self.update_mode()
 
-        delta = random.random() - 0.5
+        if self.watts_direction == "up":
+            delta = random.random() - 0.4
+        else:
+            delta = random.random() - 0.6
 
         # smaller value fluctuations during hill climbing
         if self.mode.startswith(MODE_HILL_CLIMB):
            delta /= HILL_CLIMB_MULT
 
-        new_value = self.prev_value + delta * 5
+        new_value = self.prev_value + delta * 4
 
         if new_value < 0:
             new_value = 0
