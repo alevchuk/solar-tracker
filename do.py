@@ -35,7 +35,7 @@ HILL_CLIMB_NUM_SAMPLES = 3
 
 OPTIMA_SAMPLES = 8
 
-SCAN_SLEEP = 15
+SCAN_SLEEP = 12
 HILL_CLIMB_MULT = 10 
 SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
 
@@ -340,16 +340,18 @@ def doScan(state):
     """
     METRICS.setMode(MODE_SCAN_RESET)
     state.goToLowerExtreme()
-
     # scan
     METRICS.setMode("scan-ext")
-
     max_measured_power = 0
     hill_pos = 0
+    first_move = True
     for _ in range(SCAN_NUM_MOVES):
         state.armExt(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT)
         time.sleep(MEASURE_SLEEP)
         m = LAST_SENSOR_READ.read(state)
+        if first_move:
+            state.start_of_scan = m
+            first_move = False
         if m > max_measured_power:
             max_measured_power = m
             hill_pos = state.pos
@@ -480,7 +482,7 @@ class TrackerState(object):
 
         setup(channel)
         motor_on(channel)
-        time.sleep(SCAN_SLEEP / 4)  # TODO: fix SCAN_SLEEP logic and remove /2
+        time.sleep(SCAN_SLEEP * 1.5)  # over retracting is better than over extanding
         motor_off(channel)
 
         state.pos = 0
@@ -490,7 +492,7 @@ class TrackerState(object):
 
 if __name__ == "__main__":
     state = TrackerState()
-    scan_every_n_moves = 50
+    scan_every_n_moves = 500
     n = 0
     time.sleep(MEASURE_SLEEP)  # let reader thread get it's first measurment
     while(True):
