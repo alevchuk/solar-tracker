@@ -345,10 +345,12 @@ def doScan(state):
     max_measured_power = 0
     hill_pos = 0
     first_move = True
+    scan_mesaurments = []
     for _ in range(SCAN_NUM_MOVES):
         state.armExt(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT)
         time.sleep(MEASURE_SLEEP)
         m = LAST_SENSOR_READ.read(state)
+        scan_mesaurments.append(m)
         if first_move:
             state.start_of_scan = m
             first_move = False
@@ -356,6 +358,7 @@ def doScan(state):
             max_measured_power = m
             hill_pos = state.pos
 
+    state.scan_measurements = scan_mesaurments
     print("Max found: %.3f W at position %d" % (max_measured_power / 1000, hill_pos))
 
     # localize to be on top of the hill
@@ -393,8 +396,26 @@ class TrackerState(object):
         self.attemted_direction = "ext"
         self.pos = 0
         self.start_of_scan = None
+        self.scan_measurements = None
 
     def updateEfficiency(self, new_value):
+        # check if efficiency cannot be calculated:
+        # 1. if all scan measurements are similar that means panel is not getting sun or reflector is not adding light
+        # 2. if first measurement is max, this means we are early in the morning where reflector cannot add more light,
+        #    only block light. Moreover, at this morning time, sun energy is increasing quickly and this would make the 
+        #    our approximation exaggerated because it would incorrectly claim natural sunlight increase as
+        #    gain from the reflector
+        if state.scan_measurements is None or len(state.scan_measurements) == 0:
+            return
+
+        avg_m = sum(state.scan_measurements) / len(state.scan_measurements)
+        max_m = max(state.scan_measurements)
+        if max_m < avg_m * 1.01:
+            return
+
+        if state.scan_measurements[0] == max_m:
+            return
+
         if self.start_of_scan is not None and self.start_of_scan != 0:
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
