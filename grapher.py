@@ -36,10 +36,13 @@ BG_COLOR = pygame.Color("#000000")
 TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 
-#LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
-#HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
-LEVELS = [pygame.Color("#150050"), pygame.Color("#610094")]  # Dark Purple
-HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#339400")]
+LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
+HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
+
+NUM_LEVELS = 2
+LEVELS = LEVELS[0:NUM_LEVELS]
+HILL_CLIMB_LEVELS = HILL_CLIMB_LEVELS[0:NUM_LEVELS]
+
 HILL_CLIMB_DOT = pygame.Color("#57F50A")
 
 if not pygame.font:
@@ -237,7 +240,7 @@ def main():
     background = background.convert()
 
     # Foreground Surface
-    FG_W = 798
+    FG_W = 797
     FG_H = 270
     fgSurf = pygame.Surface((FG_W, FG_H))
     fgSurf = fgSurf.convert()
