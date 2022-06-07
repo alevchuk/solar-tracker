@@ -29,6 +29,11 @@ MODE_SCAN_RET = "scan-ret"
 
 RET_CHANNEL = 20
 EXT_CHANNEL = 21
+
+
+HACK_MULT = 5
+
+
 MEASURE_SLEEP = 0.6
 
 HILL_CLIMB_NUM_SAMPLES = 3
@@ -190,7 +195,7 @@ class SensorFetcherThread(threading.Thread):
 
         self.last_sensor_read = None
 
-    def read(self, state):
+    def read(self, state, hide_metrics=False):
         if self.last_sensor_read is None:
             return None
         else:
@@ -198,8 +203,9 @@ class SensorFetcherThread(threading.Thread):
             age = time.time() - last['read_at']
             measured_power = last['value']
 
-            METRICS.setValue(measured_power / 1000)
-            METRICS.setPos(state.pos)
+            if not hide_metrics:
+                METRICS.setValue(measured_power / 1000)
+                METRICS.setPos(state.pos)
 
             if age > MEASURE_SLEEP:
                 return None
@@ -367,13 +373,21 @@ def doScan(state):
 
     # localize to be on top of the hill
     found_hill = False
+    actual_hill_pos = None
     measurements = None
     METRICS.setMode(MODE_SCAN_RET)
+    max_power_seen_during_localization = 0
     for _ in range(SCAN_NUM_MOVES):
-        if hill_pos == state.pos:
-            time.sleep(MEASURE_SLEEP)
-            max_measured_power2 = LAST_SENSOR_READ.read(state)
-            break
+        max_measured_power2 = LAST_SENSOR_READ.read(state, hide_metrics=True)
+        if max_measured_power2 is not None:
+            if max_measured_power2 > max_power_seen_during_localization:
+                max_power_seen_during_localization = max_measured_power2
+
+            if max_measured_power * 0.85 < max_measured_power2 < max_measured_power * 1.15:
+                time.sleep(MEASURE_SLEEP)
+                found_hill = True
+                actual_hill_pos = state.pos
+                break
 
         state.armRet(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT)
 
@@ -381,14 +395,15 @@ def doScan(state):
         METRICS.setValue(max_measured_power / 1000)
         METRICS.setPos(hill_pos)
 
-    if max_measured_power2 is not None:
-        found_hill = True
-        print("Hill found: {}".format(max_measured_power2 / 1000))
+    if max_measured_power2 is not None and found_hill:
+        print("Hill found: {}W".format(int(max_measured_power2 / 1000)))
+        print("Optima search position was {} while the localization postion was {}".format(hill_pos, actual_hill_pos))
         pretty_print(max_measured_power)
         print()
 
     else:
-        print("Hill NOT found! Was looking for position: {}".format(hill_pos))
+        print("Hill NOT found! Was looking for {}W at position: {}".format(int(max_measured_power / 1000), hill_pos))
+        print("Instead the largest we got was: {}W".format(int(max_power_seen_during_localization / 1000)))
 
     return found_hill
 
@@ -418,8 +433,9 @@ class TrackerState(object):
             print("CANNOT updateEfficiency: scan too flat")
             return
 
-        if state.scan_measurements[0] == max_m:
-            print("CANNOT updateEfficiency: max is on the left extreme")
+        left_most = state.scan_measurements[0]
+        if left_most > max_m * 0.95:
+            print("CANNOT updateEfficiency: max is too close to the left extreme: left is {}; max is {}".format(int(left_most / 1000), int(max_m / 1000)))
             return
 
         if self.start_of_scan is not None and self.start_of_scan != 0:
@@ -427,31 +443,39 @@ class TrackerState(object):
             METRICS.setEfficiency(efficiency_pct)
 
     def armRet(self, delay=HILL_CLIMB_MOVES_DELAY):
+        # apply hack only for hill climbing, not scan
+        hack_mult = 1
+        if delay == HILL_CLIMB_MOVES_DELAY:
+            hack_mult = HACK_MULT
+
         if self.pos <= 0:
             return
 
         try:
-            move_arm(RET_CHANNEL, delay)
+            move_arm(RET_CHANNEL, delay * hack_mult)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self.pos -= int(delay / HILL_CLIMB_MOVES_DELAY)
+            self.pos -= int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
 
     def armExt(self, delay=HILL_CLIMB_MOVES_DELAY):
+
+        # apply hack only for hill climbing, not scan
+        hack_mult = 1
+        if delay == HILL_CLIMB_MOVES_DELAY:
+            hack_mult = HACK_MULT
+
         if self.pos >= SCAN_NUM_MOVES * HILL_CLIMB_MULT:
             return
 
         try:
-            move_arm(EXT_CHANNEL, delay)
+            move_arm(EXT_CHANNEL, delay * hack_mult)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            #if delay == HILL_CLIMB_MOVES_DELAY:
-            #    self.pos += 2  # calibrate
-            #else:
-            self.pos += int(delay / HILL_CLIMB_MOVES_DELAY)
+            self.pos += int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
 
     def _moveMeasure_DEPRICATED(self, ret):
         measurements = []
@@ -519,10 +543,14 @@ class TrackerState(object):
 
 if __name__ == "__main__":
     state = TrackerState()
-    scan_every_n_moves = 500
+    scan_every_n_moves = 1000
     n = 0
     time.sleep(MEASURE_SLEEP)  # let reader thread get it's first measurement
     while(True):
+        n_remainder = n % (scan_every_n_moves / 100)
+        if n_remainder == 0:
+            print("{} of {} moves; {} left until next scan".format(
+                    n_remainder, scan_every_n_moves, scan_every_n_moves - n_remainder))
         if n % scan_every_n_moves == 0:
             found = doScan(state)
             while(not found):
