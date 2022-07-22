@@ -383,7 +383,7 @@ def doScan(state):
             if max_measured_power2 > max_power_seen_during_localization:
                 max_power_seen_during_localization = max_measured_power2
 
-            if max_measured_power * 0.85 < max_measured_power2 < max_measured_power * 1.15:
+            if max_measured_power * 0.80 < max_measured_power2 < max_measured_power * 1.20:
                 time.sleep(MEASURE_SLEEP)
                 found_hill = True
                 actual_hill_pos = state.pos
