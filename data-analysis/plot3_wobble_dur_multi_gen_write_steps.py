@@ -12,7 +12,7 @@ matplotlib.style.use('ggplot')
 data_all = read_csv('~/measurements.csv', header=0, index_col=4)
 
 for ext in [True]:
-    for gen in range(0, 98):
+    for gen in data_all["gen"].unique():
         data = data_all.query('ext == {} and gen == {}'.format(ext, gen))
 
         #<><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
@@ -21,18 +21,18 @@ for ext in [True]:
         #
         #<><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
         
-        data['wobble'] = data['angle'].rolling(20).mean()
-        data['sma'] = data['angle'].rolling(20).mean()
-        
+        data.insert(4, 'wobble', data['angle'].rolling(20).mean())
+        data.insert(5, 'sma', data['angle'].rolling(20).mean())
+
         # 1. when SMA stops changing more than X1 degree from previous sma datapoint
         T1 = 0.01
-        data['sma'][data['sma'].diff() > T1] = None
-        data['sma'][data['sma'].diff() < -T1] = None
+        data.loc[data['sma'].diff() > T1,"sma"] = None
+        data.loc[data['sma'].diff() < -T1, "sma"] = None
         
         # 2. values are within X2 degrees of the SMA
         T2 = 0.5
-        data['sma'][(data['sma'] - data['angle']) > T2] = None
-        data['sma'][(data['sma'] - data['angle']) < -T2] = None
+        data.loc[(data['sma'] - data['angle']) > T2, "sma"] = None
+        data.loc[(data['sma'] - data['angle']) < -T2, "sma"] = None
         
         # 3. 1 and 2 were true for the the last T3 datapoints
         T3 = 30
@@ -45,14 +45,15 @@ for ext in [True]:
             # check if run has ended
             if math.isnan(row['sma']):
                 if run_length < T3:
-                    data['sma'][run_start:idx] = None
+                    data.loc[run_start:idx, "sma"] = None
         
                 run_length = 0
                 run_start = idx
             else:
                 run_length += 1
-                print("@{} run length: {}".format(idx, run_length))
         
+        print("Gen: {}".format(gen))
+        print(data)
 
 
 
