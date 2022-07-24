@@ -11,8 +11,14 @@ matplotlib.style.use('ggplot')
 
 data_all = read_csv('~/measurements.csv', header=0, index_col=4)
 
-for ext in [True]:
+steps_angles = []
+steps_wobble_duration = []
+steps_ext = []
+steps_gen = []
+
+for ext in [True, False]:
     for gen in data_all["gen"].unique():
+
         data = data_all.query('ext == {} and gen == {}'.format(ext, gen))
 
         #<><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
@@ -42,85 +48,67 @@ for ext in [True]:
         for idx in range(len(data)):
             row = data.iloc[idx]
         
-            # check if run has ended
+            # check if stable run has ended
             if math.isnan(row['sma']):
                 if run_length < T3:
-                    data.loc[run_start:idx, "sma"] = None
+                    data[run_start:idx]["sma"] = None  # data.loc[] approach does not work
         
                 run_length = 0
                 run_start = idx
             else:
                 run_length += 1
+       
         
         print("Gen: {}".format(gen))
         print(data)
 
+        run_start = None
+        prev_run_end = None
+        run_start_angle = None
+        for idx in range(len(data)):
+            row = data.iloc[idx]
+            if math.isnan(row['sma']):
+                # stable run has ended
+                if run_start_angle is not None and run_start is not None and prev_run_end is not None:
+                    # fill in steps data
+                    steps_angles.append(run_start_angle)
+                    steps_wobble_duration.append(run_start - prev_run_end)
+                    steps_ext.append(row['ext'])
+                    steps_gen.append(row['gen'])
+                prev_run_end = run_start
+                run_start = None
+                
+            else:
+                # run is still going
+                if run_start is None:
+                    # start of the run
+                    run_start = idx
+                    run_start_angle = row['angle']
 
 
 
 
-
-
-steps_angles = []
-steps_wobble_duration = []
-steps_ext = []
-steps_gen = []
-
-for idx in range(len(data)):
-    row = data.iloc[idx]
-    print(row)
-
-    # check if run has ended
-    if math.isnan(row['sma']):
-        print((run_start, idx))
-        if run_length < X3:
-            data['sma'][run_start:idx] = None
-
-        # fill in steps data
-        steps_angles.append(step_start_angle)
-        steps_wobble_duration.append(run_start - prev_run_end)
-        steps_ext.append(row['ext'])
-        steps_gen.append(row['gen'])
-
-        prev_run_end = run_start + run_length
-
-        run_length = 0
-        run_start = idx
-
-    else:
-        run_length += 1
-        step_start_angle = row['angle']
+#for idx in range(len(data)):
+#    row = data.iloc[idx]
+#    print(row)
+#
+#    # check if run has ended
+#    if math.isnan(row['sma']):
+#        print((run_start, idx))
+#        if run_length < X3:
+#            data['sma'][run_start:idx] = None
+#
+#
+#        prev_run_end = run_start + run_length
+#
+#        run_length = 0
+#        run_start = idx
+#
+#    else:
+#        run_length += 1
+#        step_start_angle = row['angle']
 
  
-
-
-#for idx, row in data.iterrows():
-#    # step
-#    if idx % 1000 == 0:
-#        # drop values for the prev step
-#        if idx > 1000:
-#           data['sma'][step_start:first_long_run_start] = None
-#           print(run_lenght)
-#           print("Dropping from {} to {}".format(step_start, first_long_run_start))
-#
-#        steps_angles.append(step_start_angle)
-#        steps_wobble_duration.append(first_long_run_start - step_start)
-#        steps_ext.append(row['ext'])
-#        steps_gen.append(row['gen'])
-#        
-#        run_lenght = 0
-#        first_long_run_start = idx
-#        step_start = idx
-#        step_start_angle = row['angle']
-#
-#    if math.isnan(row['sma']):
-#        if run_lenght < 50:
-#            # reset the long run if it's not long enough
-#            run_lenght = 0
-#            first_long_run_start = idx
-#    else:
-#        run_lenght += 1
-
 df = pd.DataFrame.from_dict(
     {
         'angles': steps_angles,

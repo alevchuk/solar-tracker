@@ -34,7 +34,7 @@ data.loc[(data['sma'] - data['angle']) > T2, "sma"] = None
 data.loc[(data['sma'] - data['angle']) < -T2, "sma"] = None
 
 # 3. 1 and 2 were true for the the last T3 datapoints
-T3 = 30
+T3 = 50
 run_start = 0
 run_length = 0
 
@@ -44,7 +44,7 @@ for idx in range(len(data)):
     # check if run has ended
     if math.isnan(row['sma']):
         if run_length < T3:
-            data.loc[run_start:idx, "sma"] = None
+            data["sma"][run_start:idx] = None  # data.loc[] approach does not work
 
         run_length = 0
         run_start = idx
