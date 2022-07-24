@@ -1,4 +1,4 @@
-#!/home/nky/solar-tracker/data-analysis/bin/python3
+#!./bin/python3
 
 from pandas import read_csv
 from matplotlib import pyplot
