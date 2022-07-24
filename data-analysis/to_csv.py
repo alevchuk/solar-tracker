@@ -21,5 +21,8 @@ with open(path("~/measurements-2022-07-15.txt")) as f:
 
 with open(path("~/measurements-2022-07-15.csv"), "w") as f:
     f.write("ts,delay,gen,ext,count,angle\n")
-    for row in all_rows:
-        f.write(",".join(row) + "\n")
+    for line_no, row in enumerate(all_rows):
+        if row[2].isdigit():
+            f.write(",".join(row) + "\n")
+        else:
+            print("BAD ROW: {}".format(line_no))

@@ -14,11 +14,14 @@ ext = False
 data = read_csv('~/gen1.csv', header=0, index_col=4)
 
 
-# calculating simple moving average
-data['wobble'] = data['angle'].rolling(100).mean()
-data['sma'] = data['angle'].rolling(100).mean()
- 
-# to cacluate the duration of the wabble, we'll find 1 and 2:
+#<><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
+#
+#     Cacluate the duration of the wabble (in 3 steps)
+#
+#<><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
+
+data['wobble'] = data['angle'].rolling(20).mean()
+data['sma'] = data['angle'].rolling(20).mean()
 
 # 1. when SMA stops changing more than X1 degree from previous sma datapoint
 T1 = 0.01
@@ -31,7 +34,7 @@ data['sma'][(data['sma'] - data['angle']) > T2] = None
 data['sma'][(data['sma'] - data['angle']) < -T2] = None
 
 # 3. 1 and 2 were true for the the last T3 datapoints
-T3 = 10
+T3 = 30
 run_start = 0
 run_length = 0
 
