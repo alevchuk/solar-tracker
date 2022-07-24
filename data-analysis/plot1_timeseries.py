@@ -1,4 +1,4 @@
-#!/home/nky/pandas/bin/python3
+#!/home/nky/solar-tracker/data-analysis/bin/python3
 
 from pandas import read_csv
 from matplotlib import pyplot
@@ -7,7 +7,7 @@ import matplotlib
 matplotlib.use('TkAgg')
 
 ext = True
-series = read_csv('/home/nky/measurements.csv', header=0, index_col=4)
+series = read_csv('~/measurements.csv', header=0, index_col=4)
 
 plot1 = series[series["gen"] == 1][series["ext"] == ext].plot(y="angle", fontsize=20)
 plot1.set_title("Step size: 1 second", fontsize=50)

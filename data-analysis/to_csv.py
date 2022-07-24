@@ -1,8 +1,12 @@
 #!/usr/bin/python3
 
-PATH = "/home/nky"
+import os
+
+def path(path):
+    return os.path.expanduser(path)
+
 all_rows = []
-with open(PATH + "/measurements-2022-07-15.txt") as f:
+with open(path("~/measurements-2022-07-15.txt")) as f:
     for line in f:
         #ts, delay, gen, ext, count, angle = line.split()
         #ts = float(ts)
@@ -15,7 +19,7 @@ with open(PATH + "/measurements-2022-07-15.txt") as f:
         #all_rows.append([ts, gen, ext, count, angle])
         all_rows.append(line.split())
 
-with open(PATH + "/measurements-2022-07-15.csv", "w") as f:
+with open(path("~/measurements-2022-07-15.csv"), "w") as f:
     f.write("ts,delay,gen,ext,count,angle\n")
     for row in all_rows:
         f.write(",".join(row) + "\n")

@@ -1,4 +1,4 @@
-#!/home/nky/pandas/bin/python3
+#!/home/nky/solar-tracker/data-analysis/bin/python3
 
 from pandas import read_csv
 from matplotlib import pyplot
@@ -10,8 +10,8 @@ matplotlib.use('TkAgg')
 matplotlib.style.use('ggplot')
 
 ext = False
-# head -n1 /home/nky/measurements.csv > gen1.csv && awk -F, '$3 == 1 {print $0}' /home/nky/measurements.csv >> gen1.csv 
-data = read_csv('gen1.csv', header=0, index_col=4)
+# head -n1 ~/measurements.csv > ~/gen1.csv && awk -F, '$3 == 1 {print $0}' ~/measurements.csv >> ~/gen1.csv 
+data = read_csv('~/gen1.csv', header=0, index_col=4)
 
 
 # calculating simple moving average

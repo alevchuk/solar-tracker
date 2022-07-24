@@ -1,4 +1,4 @@
-#!/home/nky/pandas/bin/python3
+#!/home/nky/solar-tracker/data-analysis/bin/python3
 
 import pandas as pd
 from pandas import read_csv
@@ -11,7 +11,7 @@ from scipy.fftpack import fft, ifft
 matplotlib.use('TkAgg')
 
 ext = True
-series = read_csv('/home/nky/measurements.csv', header=0, index_col=4)
+series = read_csv('~/measurements.csv', header=0, index_col=4)
 series = series[series["gen"] == 10][series["ext"] == ext]
 #series = series.rolling(3).mean()
 series = series.head(550)

@@ -1,4 +1,4 @@
-#!/home/nky/pandas/bin/python3
+#!/home/nky/solar-tracker/data-analysis/bin/python3
 
 import matplotlib.pyplot as plt
 from matplotlib import pyplot
@@ -19,7 +19,7 @@ matplotlib.style.use('ggplot')
 
 # example_heatmap()
 
-df = read_csv('steps.csv', header=0) #, index_col=4)
+df = read_csv('~/steps.csv', header=0) #, index_col=4)
 
 angles_range = range(0, 40)
 
