@@ -171,8 +171,6 @@ def has_wobble(angles):
         if s is None:
             return True
 
-    print("SMA: {}".format(sma))
-
     return False  # does not have wobble
 
 
@@ -191,10 +189,9 @@ class StepSize(object):
         self.measurements.append([ts, ts - now_ts, self.gen, self.ext, self.count, angle])
         self.angles.append(angle)
 
+        ##print(angle)
         if not has_wobble(self.angles):
-            ext(0.1)  # TODO: remove
-
-            with open(MEASUREMENTS_FILE, "a") as f: 
+            with open(MEASUREMENTS_FILE, "a") as f:
                 for measurements_row in self.measurements:
                     f.write("\t".join([str(m) for m in measurements_row]) + "\n")
 
@@ -232,11 +229,8 @@ if __name__ == "__main__":
     setup()
 
     # drop old records
-    with open(MEASUREMENTS_FILE, "w") as f: 
+    with open(MEASUREMENTS_FILE, "w") as f:
         pass
-
-    # TODO: remove
-    ext(0.01)
 
     try:
         while True:
