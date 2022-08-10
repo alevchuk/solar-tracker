@@ -313,7 +313,11 @@ void setMode1(int h) {
   }
 }
 
-void collectSensorData(int h) {
+void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
+	char* p = dataSending;
+	char* end = dataSending + dataCapacity;
+	int n = 0;
+
   short x = -100, y = -100, z = -100, sto = -100;
   while (x == -100 || y == -100 || z == -100 || sto == -100) {
     // read X
@@ -333,7 +337,6 @@ void collectSensorData(int h) {
     sto = readSTO(h, Read_Status_Summary);
   }
 
-  bool print_raw = true;
 	double len;
   double angle, angle_deg;
 
@@ -348,24 +351,56 @@ void collectSensorData(int h) {
   angle = acos((x_0 * x + y_0 * y + z_0 * z) / (len_0 * len));
   angle_deg = angle * (180.0 / M_PI);
 
-  if (print_raw) {
-    printf("%f\t", time_time());
-    printf("%f\t", (float)x / MODE1_SENSITIVITY);
-    printf("%f\t", (float)y / MODE1_SENSITIVITY);
-    printf("%f\t", (float)z / MODE1_SENSITIVITY);
-    printf("%f\t", angle_deg);
-    printf("%.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
-    printf("%d\t", sto);
-  } else {
-    printf("ts = %f\t", time_time());
-    printf("x = %fg\t", (float)x / MODE1_SENSITIVITY);
-    printf("y = %fg\t", (float)y / MODE1_SENSITIVITY);
-    printf("z = %fg\t", (float)z / MODE1_SENSITIVITY);
-    printf("angle = %f\t", angle_deg);
-    printf("crc_ok_rate = %.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
-    printf("sto = %d\t", sto);
-  }
-  printf("\n");
+
+	// // send to network
+  n = snprintf(p, dataCapacity, "%f\t", time_time());
+	p += n; dataCapacity -= n;
+	
+  n = snprintf(p, dataCapacity, "%f\t", (float)x / MODE1_SENSITIVITY);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%f\t", (float)y / MODE1_SENSITIVITY);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%f\t", (float)z / MODE1_SENSITIVITY);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%f\t", angle_deg);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%d", sto);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "\n");
+	p += n; dataCapacity -= n;
+
+	if (p >= end) {
+		printf("ERROR: trying to write too much data to the nework\n");
+		exit(1);
+	}
+
+  // // raw
+  //  printf("%f\t", time_time());
+  //  printf("%f\t", (float)x / MODE1_SENSITIVITY);
+  //  printf("%f\t", (float)y / MODE1_SENSITIVITY);
+  //  printf("%f\t", (float)z / MODE1_SENSITIVITY);
+  //  printf("%f\t", angle_deg);
+  //  printf("%.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
+  //  printf("%d\t", sto);
+
+	// // human
+  //  printf("ts = %f\t", time_time());
+  //  printf("x = %fg\t", (float)x / MODE1_SENSITIVITY);
+  //  printf("y = %fg\t", (float)y / MODE1_SENSITIVITY);
+  //  printf("z = %fg\t", (float)z / MODE1_SENSITIVITY);
+  //  printf("angle = %f\t", angle_deg);
+  //  printf("crc_ok_rate = %.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
+  //  printf("sto = %d\t", sto);
+  //}
+  //printf("\n");
 }
 
 void swResetAndCheck(int h) {
@@ -417,7 +452,6 @@ int main(int argc, char *argv[]) {
     // read sensor data for ever TCP request
 
     int h;
-		float start_time, end_time;
 
     // SPI sensor setup
     if (gpioInitialise() < 0) {
@@ -432,24 +466,7 @@ int main(int argc, char *argv[]) {
 		printf("Listening on port %d\n", PORT);
 		while (true) {
 				clintConnt = accept(clintListn, (struct sockaddr*)NULL, NULL);
-				printf("acceoted client connection\n");
-			
-				start_time = time_time();	
-				write(clintConnt, "OHI\n", strlen("OHI"));
-				printf("wrote OHI\n");
-
-      	collectSensorData(h);
-				end_time = time_time();	
-
-				printf("collected sensor data\n");
-
-				if (end_time - start_time > 2) {
-        	printf("Sensor collection timeout, took: %fs\n", end_time - start_time);
-        	return 1;
-				}
-			
-				snprintf(dataSending, sizeof(dataSending),
-					"Collection started at %f.\n", start_time);
+				collectSensorData(h, &dataSending[0], 1025);
 				write(clintConnt, dataSending, strlen(dataSending));
 
         close(clintConnt);

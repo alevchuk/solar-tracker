@@ -20,6 +20,10 @@ import logging
 logging.getLogger("imported_module").setLevel(logging.WARNING)
 
 import statistics
+
+
+SENSOR_PORT = 2017
+
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
@@ -174,7 +178,7 @@ SHUNT_OHMS = (SHUNT_MV / 1000) / MAX_EXPECTED_AMPS  # R = V / i
 print("Shunt resistance: {} ohms".format(SHUNT_OHMS))
 
 
-def pretty_print(measured_power):
+def pretty_print_pow(measured_power):
     label = "Power: %.3f W" % (measured_power / 1000)
     print(label, end = " ")
     term_width = get_terminal_size()[0] - len(label) - 1
@@ -205,7 +209,7 @@ class SensorFetcherThread(threading.Thread):
 
             if not hide_metrics:
                 METRICS.setValue(measured_power / 1000)
-                METRICS.setPos(state.pos)
+                METRICS.setPos(state.pos * 15)
 
             if age > MEASURE_SLEEP:
                 return None
@@ -249,77 +253,109 @@ class SensorFetcherThread(threading.Thread):
 # Run in the background
 LAST_SENSOR_READ = SensorFetcherThread()
 
+def further(state):
+    if state.attemted_direction == "ret":
+        METRICS.setMode(MODE_HILL_CLIMB_RET)
+        state.armRet()
+        print("Try Ret")
+    else:
+        METRICS.setMode(MODE_HILL_CLIMB_EXT)
+        state.armExt()
+        print("Try Ext")
+
+def undo(state):
+    if state.attemted_direction == "ret":
+        METRICS.setMode(MODE_HILL_CLIMB_EXT)
+        state.armExt()
+        print("Undo Ret")
+    else:
+        METRICS.setMode(MODE_HILL_CLIMB_RET)
+        state.armRet()
+        print("Undo Ext")
+
 def hill_climb(state):
     print(state.descision_history)
 
-    improving_list = []
-    for _ in range(HILL_CLIMB_NUM_SAMPLES):
-        improving = 0
-        power_before = None
+    power_before = None
+    while (power_before is None):
+        time.sleep(MEASURE_SLEEP)
+        power_before = LAST_SENSOR_READ.read(state)
 
+    # Try
+    further(state)
+
+    power_after = None
+    while (power_after is None):
+        time.sleep(MEASURE_SLEEP)
+        power_after = LAST_SENSOR_READ.read(state)
+
+    # print("Power before: {}   <=> Power after {}".format(power_before, power_after))
+    state.updateEfficiency(power_after)
+    METRICS.setMode(MODE_HILL_CLIMB)
+
+    descision = state.attemted_direction
+    if power_after - power_before > 0:
+        print("We have improvement of +%.3f mW !" % (power_after - power_before))
+        # we still need to test for ani-imporvment to avoid getting tricked by clouds
+
+        undo(state)
+        undo(state)
+
+        power_on_the_filp_side = None
+        while (power_on_the_filp_side is None):
+            time.sleep(MEASURE_SLEEP)
+            power_on_the_filp_side = LAST_SENSOR_READ.read(state)
+
+        if power_before - power_on_the_filp_side < (power_after - power_before) / 2:
+            print("Anti-improvement of -%.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
+            further(state)
+            descision = "stay"
+        else:
+            # Advance in favorable direction
+            further(state)
+            further(state)
+    else:
+        # before reversing we still need to test for ani-imporvment to avoid getting tricked by clouds
+        undo(state)
+
+        power_before = None
         while (power_before is None):
             time.sleep(MEASURE_SLEEP)
             power_before = LAST_SENSOR_READ.read(state)
 
-        # Try
-        if state.attemted_direction == "ret":
-            METRICS.setMode(MODE_HILL_CLIMB_RET)
-            state.armRet()
-            #print("Try Ret")
-        else:
-            METRICS.setMode(MODE_HILL_CLIMB_EXT)
-            state.armExt()
-            #print("Try Ext")
-
+        undo(state)
         power_after = None
         while (power_after is None):
             time.sleep(MEASURE_SLEEP)
             power_after = LAST_SENSOR_READ.read(state)
 
-        # print("Power before: {}   <=> Power after {}".format(power_before, power_after))
-        state.updateEfficiency(power_after)
-        METRICS.setMode(MODE_HILL_CLIMB)
-        improving = power_after - power_before
-        improving_list.append(improving)
-
-        # Undo
-        if state.attemted_direction == "ret":
-            METRICS.setMode(MODE_HILL_CLIMB_EXT)
-            state.armExt()
-            #print("Undo Ret")
+        if power_after - power_before < 0:
+            print("Reversing also does not make sense. Maybe a cloud?")
+            further(state)
+            descision = "stay"
         else:
-            METRICS.setMode(MODE_HILL_CLIMB_RET)
-            state.armRet()
-            #print("Undo Ext")
+            print("We have improvement of +%.3f mW when revrsing !" % (power_after - power_before))
+            # we still need to test for ani-imporvment to avoid getting tricked by clouds
 
-        time.sleep(0.2)
-        METRICS.setMode(MODE_HILL_CLIMB)
+            power_on_the_filp_side = None
+            while (power_on_the_filp_side is None):
+                time.sleep(MEASURE_SLEEP)
+                power_on_the_filp_side = LAST_SENSOR_READ.read(state)
 
-    improving_avg = sum(improving_list) / len(improving_list)
-    state.improvement_history.append(improving_avg)
-    #print("Improvement list: {}".format([round(i, 2) for i in improving_list]))
-    #print("Improvement avg: {}".format(round(improving_avg, 3)))
+            if power_on_the_filp_side - power_before > abs(power_after - power_before) / 2:
+                # Reverse directions
+                if state.attemted_direction == "ret":
+                    state.attemted_direction = "ext"
+                else:
+                    state.attemted_direction = "ret"
+            else:
+                print("Anti-improvement of +%.3f mW is not sufficient! Maybe a cloud?" % (power_on_the_filp_side - power_before))
+                further(state)
+                descision = "stay"
 
-    if sum(improving_list) >= 0:
-        # Advance in favorable direction
-        if state.attemted_direction == "ret":
-            state.armRet()
-            # print("Advance Ret  <------------")
-        else:
-            state.armExt()
-            #print("Advance Ext <------------")
-            time.sleep(MEASURE_SLEEP)
-    else:
-        # Reverse
-        if state.attemted_direction == "ret":
-            state.attemted_direction = "ext"
-        else:
-            state.attemted_direction = "ret"
-        
-        #print("Reverse to: {} <----------- X ----------".format(state.attempted_direction))
+    METRICS.setMode(MODE_HILL_CLIMB)
 
-
-    state.descision_history.append(state.attemted_direction)
+    state.descision_history.append(descision)
     if len(state.descision_history) > OPTIMA_SAMPLES:
         state.descision_history = state.descision_history[-OPTIMA_SAMPLES:]
 
@@ -352,9 +388,9 @@ def doScan(state):
     max_measured_power = 0
     hill_pos = 0
     scan_measurements = []
-    print("Starting scan extent")
+    print("Starting scan")
     for _ in range(SCAN_NUM_MOVES):
-        state.armExt(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT)
+        state.armExt()
         time.sleep(MEASURE_SLEEP)
         m = LAST_SENSOR_READ.read(state)
         if m is not None:
@@ -369,7 +405,7 @@ def doScan(state):
         state.start_of_scan = state.scan_measurements[0]
         state.updateEfficiency(max(state.scan_measurements))
 
-    print("Max found: %.3f W at position %d" % (max_measured_power / 1000, hill_pos))
+    print("Max found: %.3f W at %.3f degrees" % (max_measured_power / 1000, hill_pos))
 
     # localize to be on top of the hill
     found_hill = False
@@ -378,27 +414,28 @@ def doScan(state):
     METRICS.setMode(MODE_SCAN_RET)
     max_power_seen_during_localization = 0
     for _ in range(SCAN_NUM_MOVES):
-        max_measured_power2 = LAST_SENSOR_READ.read(state, hide_metrics=True)
-        if max_measured_power2 is not None:
-            if max_measured_power2 > max_power_seen_during_localization:
-                max_power_seen_during_localization = max_measured_power2
+        angle = get_line_and_parse()
 
-            if max_measured_power * 0.80 < max_measured_power2 < max_measured_power * 1.20:
-                time.sleep(MEASURE_SLEEP)
-                found_hill = True
-                actual_hill_pos = state.pos
-                break
+        # take first step bellow the hill degrees + 0.5 degree
+        # we can make this more accurate by
+        # moving the reflector back up by a smaller degree
+        # then back down, etc... until we get desired precision
+        if angle <= (hill_pos + 0.5):
+            time.sleep(MEASURE_SLEEP)
+            found_hill = True
+            actual_hill_pos = state.pos
+            break
 
-        state.armRet(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT)
+        state.armRet()
 
         # so we don't mark data as stale
         METRICS.setValue(max_measured_power / 1000)
-        METRICS.setPos(hill_pos)
+        METRICS.setPos(hill_pos * 15)
 
-    if max_measured_power2 is not None and found_hill:
-        print("Hill found: {}W".format(int(max_measured_power2 / 1000)))
+    if found_hill:
+        print("Hill found: {}W".format(int(max_measured_power / 1000)))
         print("Optima search position was {} while the localization postion was {}".format(hill_pos, actual_hill_pos))
-        pretty_print(max_measured_power)
+        pretty_print_pow(max_measured_power)
         print()
 
     else:
@@ -407,15 +444,73 @@ def doScan(state):
 
     return found_hill
 
+# calculating simple moving average over window_size points
+def rolling_mean(data, window_size):
+    moving_averages = []
+
+    for i in range(len(data)):
+        new_window_size = window_size
+        if (i + 1) >= window_size:
+            window_start = i - (window_size - 1)
+        else:
+            window_start = 0
+            new_window_size = i + 1
+
+        window = data[window_start:(i + 1)]
+        window_average = sum(window) / new_window_size
+        moving_averages.append(window_average)
+
+    return moving_averages
+
+
+def has_wobble(angles):
+    # 1. when SMA stops changing more than 0.01 degree from previous sma datapoint
+    sma = rolling_mean(angles, 300)
+    prev_sma = sma[0] - 1  # first data point always fails condition 1
+    for i in range(len(sma)):
+        currnet_sma = sma[i]
+        if abs(prev_sma - currnet_sma) > 0.001:
+            sma[i] = None  # fail condition 1
+
+        prev_sma = currnet_sma
+
+    # 2. values are within 0.05 degree of the SMA
+    for i in range(len(sma)):
+        if sma[i] is not None and abs(angles[i] - sma[i]) > 0.05:
+            sma[i] = None
+
+    # 3. all of the aboive is true for the the last 50 datapoints
+    for s in sma[-50:]:
+        if s is None:
+            return True
+
+    return False  # does not have wobble
+
+
+def wait_for_wobble_to_stop():
+    angles_while_wobble = []
+    while True:
+        angle = get_line_and_parse()
+        angles_while_wobble.append(angle)
+        if not has_wobble(angles_while_wobble):
+            break
+
+def pretty_print_deg(angle_degrees):
+    label = "Angle (degrees): %.3f" % angle_degrees
+    print(label, end = " ")
+    term_width = get_terminal_size()[0] - len(label) - 1
+    ratio = (angle_degrees) / 180
+    print("*" * int(term_width * ratio))
+
 
 class TrackerState(object):
     def __init__(self):
         self.descision_history = []
-        self.improvement_history = []
         self.attemted_direction = "ext"
         self.pos = 0
         self.start_of_scan = None
         self.scan_measurements = None
+        self.angles_while_wobble = []
 
     def updateEfficiency(self, new_value):
         # check if efficiency cannot be calculated:
@@ -442,7 +537,7 @@ class TrackerState(object):
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
 
-    def armRet(self, delay=HILL_CLIMB_MOVES_DELAY):
+    def armRet(self, delay=(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT * 7)):
         # apply hack only for hill climbing, not scan
         hack_mult = 1
         if delay == HILL_CLIMB_MOVES_DELAY:
@@ -457,10 +552,16 @@ class TrackerState(object):
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self.pos -= int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
+            # 1. wait for wobble to stop
+            wait_for_wobble_to_stop()
 
-    def armExt(self, delay=HILL_CLIMB_MOVES_DELAY):
+            # 2. set pos to inclinometer angle
+            #self.pos -= int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
+            angle = get_line_and_parse()
+            pretty_print_deg(angle)
+            self.pos = angle
 
+    def armExt(self, delay=(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT * 7)):
         # apply hack only for hill climbing, not scan
         hack_mult = 1
         if delay == HILL_CLIMB_MOVES_DELAY:
@@ -475,7 +576,14 @@ class TrackerState(object):
         except KeyboardInterrupt:
             GPIO.cleanup()
         else:
-            self.pos += int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
+            # 1. wait for wabble to stop
+            wait_for_wobble_to_stop()
+
+            # 2. set pos to inclinometer angle
+            #self.pos += int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
+            angle = get_line_and_parse()
+            pretty_print_deg(angle)
+            self.pos = angle
 
     def _moveMeasure_DEPRICATED(self, ret):
         measurements = []
@@ -541,20 +649,42 @@ class TrackerState(object):
         METRICS.setEfficiency(None)
 
 
+def get_line():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect(("127.0.0.1", SENSOR_PORT))
+        return s.recv(1024)
+
+
+def get_line_and_parse():
+    try:
+        line = get_line()
+        ts, x, y, z, angle, crc_ok_rate, sto = line.split(b'\t')
+        angle = float(angle)
+    except Exception as e:
+        print("ERROR: cold not get incli data: {}".format(e))
+        print(e)
+        raise e
+    else:
+        return angle
+
+
 if __name__ == "__main__":
     state = TrackerState()
-    scan_every_n_moves = 1000
+    scan_every_n_moves = 100
     n = 0
     time.sleep(MEASURE_SLEEP)  # let reader thread get it's first measurement
+
+
+
     while(True):
-        n_remainder = n % (scan_every_n_moves / 100)
-        if n_remainder == 0:
-            print("{} of {} moves; {} left until next scan".format(
-                    n_remainder, scan_every_n_moves, scan_every_n_moves - n_remainder))
-        if n % scan_every_n_moves == 0:
-            found = doScan(state)
-            while(not found):
-                found = doScan(state)
+        n_remainder = n % scan_every_n_moves
+        print("{} of {} moves; {} left until next scan".format(
+                n_remainder, scan_every_n_moves, scan_every_n_moves - n_remainder))
+
+        #if n % scan_every_n_moves == 0:
+        #    found = doScan(state)
+        #    while(not found):
+        #        found = doScan(state)
 
         hill_climb(state)
         n += 1
