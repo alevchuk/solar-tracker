@@ -401,6 +401,8 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
   //  printf("sto = %d\t", sto);
   //}
   //printf("\n");
+
+  printf("%f\n", angle_deg);
 }
 
 void swResetAndCheck(int h) {

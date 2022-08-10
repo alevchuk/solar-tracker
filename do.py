@@ -35,27 +35,14 @@ RET_CHANNEL = 20
 EXT_CHANNEL = 21
 
 
-HACK_MULT = 5
-
 
 MEASURE_SLEEP = 0.6
 
-HILL_CLIMB_NUM_SAMPLES = 3
-
 OPTIMA_SAMPLES = 8
 
-SCAN_SLEEP = 12
-HILL_CLIMB_MULT = 10
-SCAN_NUM_MOVES = 100 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES)
-
-#SCAN_SLEEP = 60   # scan ext takes 35s (why?) when SCAN_SLEEP = 7
-#HILL_CLIMB_MULT = 4  # resolution multiplier for hill climbing
-#SCAN_NUM_MOVES = 60 # Metrics getData()["pos"] will range is (0, SCAN_NUM_MOVES * HILL_CLIMB_MULT). Tip: make SCAN_SLEEP == SCAN_NUM_MOVES so each scan step is 1 second, this seems to work well
-# Also:
-# - hill climbing takes one measurement per move
-TOTAL_POSITIONS = SCAN_NUM_MOVES * HILL_CLIMB_MULT
-SCAN_MOVES_DELAY = SCAN_SLEEP / SCAN_NUM_MOVES  # during scan
-HILL_CLIMB_MOVES_DELAY = SCAN_SLEEP / TOTAL_POSITIONS  # during hill climbing
+REWIND_SLEEP = 6
+SCAN_DEG_START = 1
+SCAN_DEG_END = 60
 
 
 class Metrics(object):
@@ -307,7 +294,7 @@ def hill_climb(state):
             power_on_the_filp_side = LAST_SENSOR_READ.read(state)
 
         if power_before - power_on_the_filp_side < (power_after - power_before) / 2:
-            print("Anti-improvement of -%.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
+            print("Anti-improvement of %.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
             further(state)
             descision = "stay"
         else:
@@ -382,14 +369,14 @@ def doScan(state):
     """
     METRICS.setMode(MODE_SCAN_RESET)
     print("Moving to lower extreme")
-    state.goToLowerExtreme()
+    state.toLowerExtreme(state)
     # scan
     METRICS.setMode("scan-ext")
     max_measured_power = 0
     hill_pos = 0
     scan_measurements = []
     print("Starting scan")
-    for _ in range(SCAN_NUM_MOVES):
+    while state.pos < SCAN_DEG_END:
         state.armExt()
         time.sleep(MEASURE_SLEEP)
         m = LAST_SENSOR_READ.read(state)
@@ -413,14 +400,12 @@ def doScan(state):
     measurements = None
     METRICS.setMode(MODE_SCAN_RET)
     max_power_seen_during_localization = 0
-    for _ in range(SCAN_NUM_MOVES):
-        angle = get_line_and_parse()
-
+    while state.pos > SCAN_DEG_START:
         # take first step bellow the hill degrees + 0.5 degree
         # we can make this more accurate by
         # moving the reflector back up by a smaller degree
         # then back down, etc... until we get desired precision
-        if angle <= (hill_pos + 0.5):
+        if state.pos <= (hill_pos + 0.5):
             time.sleep(MEASURE_SLEEP)
             found_hill = True
             actual_hill_pos = state.pos
@@ -505,6 +490,7 @@ def pretty_print_deg(angle_degrees):
 
 class TrackerState(object):
     def __init__(self):
+        self.step_delay = 1
         self.descision_history = []
         self.attemted_direction = "ext"
         self.pos = 0
@@ -537,17 +523,14 @@ class TrackerState(object):
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
 
-    def armRet(self, delay=(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT * 7)):
-        # apply hack only for hill climbing, not scan
-        hack_mult = 1
-        if delay == HILL_CLIMB_MOVES_DELAY:
-            hack_mult = HACK_MULT
-
-        if self.pos <= 0:
-            return
+    def armRet(self, delay=None):
+        if delay is not None:
+            _delay = delay
+        else:
+            _delay = self.step_delay
 
         try:
-            move_arm(RET_CHANNEL, delay * hack_mult)
+            move_arm(RET_CHANNEL, _delay)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
@@ -556,22 +539,13 @@ class TrackerState(object):
             wait_for_wobble_to_stop()
 
             # 2. set pos to inclinometer angle
-            #self.pos -= int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
             angle = get_line_and_parse()
             pretty_print_deg(angle)
             self.pos = angle
 
-    def armExt(self, delay=(HILL_CLIMB_MOVES_DELAY * HILL_CLIMB_MULT * 7)):
-        # apply hack only for hill climbing, not scan
-        hack_mult = 1
-        if delay == HILL_CLIMB_MOVES_DELAY:
-            hack_mult = HACK_MULT
-
-        if self.pos >= SCAN_NUM_MOVES * HILL_CLIMB_MULT:
-            return
-
+    def armExt(self):
         try:
-            move_arm(EXT_CHANNEL, delay * hack_mult)
+            move_arm(EXT_CHANNEL, self.step_delay)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
@@ -580,71 +554,16 @@ class TrackerState(object):
             wait_for_wobble_to_stop()
 
             # 2. set pos to inclinometer angle
-            #self.pos += int(delay / HILL_CLIMB_MOVES_DELAY) * hack_mult
             angle = get_line_and_parse()
             pretty_print_deg(angle)
             self.pos = angle
 
-    def _moveMeasure_DEPRICATED(self, ret):
-        measurements = []
-        first_move = False
+    def toLowerExtreme(self, state):
+        state.armRet(REWIND_SLEEP)
 
-        if ret:
-            channel = RET_CHANNEL
-        else:
-            channel = EXT_CHANNEL
-            if self.pos == 0:
-                first_move = True
+        while state.pos > SCAN_DEG_START:
+            state.armRet(REWIND_SLEEP)
 
-        setup(channel)
-        motor_on(channel)
-
-        num_moves = HILL_CLIMB_MULT
-
-        time.sleep(SCAN_MOVES_DELAY)
-
-        for _ in range(int(num_moves / 2)):
-            measured_power = LAST_SENSOR_READ.read(state)
-            if measured_power is not None:
-                measurements.append(measured_power)
-
-            time.sleep(measure_move_delay / 2)
-            if ret:
-                self.pos -= 1
-            else:
-                self.pos += 1
-
-        motor_off(channel)
-
-        for _ in range(int(num_moves / 2)):
-            measured_power = LAST_SENSOR_READ.read(state)
-            if measured_power is not None:
-                measurements.append(measured_power)
-            time.sleep(measure_move_delay / 2)
-
-        measurements = remove_outliers(measurements)
-
-        if first_move and len(measurements) > 0:
-            self.start_of_scan = measurements[0]
-
-        return measurements
-
-    def moveMeasure_DEPRICATED(self, ret=True):
-        try:
-            return self._moveMeasure_DEPRICATED(ret)
-            GPIO.cleanup()
-        except KeyboardInterrupt:
-            GPIO.cleanup()
-
-    def goToLowerExtreme(self):
-        channel = RET_CHANNEL
-
-        setup(channel)
-        motor_on(channel)
-        time.sleep(SCAN_SLEEP * 1.5)  # gotta make sure we always start at the extreme
-        motor_off(channel)
-
-        state.pos = 0
         state.start_of_scan = None
         METRICS.setEfficiency(None)
 
@@ -681,10 +600,10 @@ if __name__ == "__main__":
         print("{} of {} moves; {} left until next scan".format(
                 n_remainder, scan_every_n_moves, scan_every_n_moves - n_remainder))
 
-        #if n % scan_every_n_moves == 0:
-        #    found = doScan(state)
-        #    while(not found):
-        #        found = doScan(state)
+        if n % scan_every_n_moves == 0:
+            found = doScan(state)
+            while(not found):
+                found = doScan(state)
 
         hill_climb(state)
         n += 1
