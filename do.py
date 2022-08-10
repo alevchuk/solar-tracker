@@ -20,6 +20,9 @@ import logging
 logging.getLogger("imported_module").setLevel(logging.WARNING)
 
 import statistics
+import os
+
+HOME = os.path.expanduser("~")
 
 
 SENSOR_PORT = 2017
@@ -293,7 +296,7 @@ def hill_climb(state):
             time.sleep(MEASURE_SLEEP)
             power_on_the_filp_side = LAST_SENSOR_READ.read(state)
 
-        if power_before - power_on_the_filp_side < (power_after - power_before) / 2:
+        if power_before - power_on_the_filp_side < (power_after - power_before) * 0.9:
             print("Anti-improvement of %.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
             further(state)
             descision = "stay"
@@ -329,7 +332,7 @@ def hill_climb(state):
                 time.sleep(MEASURE_SLEEP)
                 power_on_the_filp_side = LAST_SENSOR_READ.read(state)
 
-            if power_on_the_filp_side - power_before > abs(power_after - power_before) / 2:
+            if power_on_the_filp_side - power_before > abs(power_after - power_before) * 0.9:
                 # Reverse directions
                 if state.attemted_direction == "ret":
                     state.attemted_direction = "ext"
@@ -400,12 +403,14 @@ def doScan(state):
     measurements = None
     METRICS.setMode(MODE_SCAN_RET)
     max_power_seen_during_localization = 0
-    while state.pos > SCAN_DEG_START:
+
+    while True:
+        hill_on_the_left = (hill_pos < SCAN_DEG_START and state.pos < SCAN_DEG_START)
         # take first step bellow the hill degrees + 0.5 degree
         # we can make this more accurate by
         # moving the reflector back up by a smaller degree
         # then back down, etc... until we get desired precision
-        if state.pos <= (hill_pos + 0.5):
+        if state.pos <= (hill_pos + 0.5) or hill_on_the_left:
             time.sleep(MEASURE_SLEEP)
             found_hill = True
             actual_hill_pos = state.pos
@@ -490,7 +495,7 @@ def pretty_print_deg(angle_degrees):
 
 class TrackerState(object):
     def __init__(self):
-        self.step_delay = 1
+        self.step_delay = 0.5
         self.descision_history = []
         self.attemted_direction = "ext"
         self.pos = 0
@@ -523,14 +528,16 @@ class TrackerState(object):
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
 
-    def armRet(self, delay=None):
+    def _arm(self, delay, direction):
         if delay is not None:
             _delay = delay
         else:
             _delay = self.step_delay
 
+        angle_before = get_line_and_parse()
+
         try:
-            move_arm(RET_CHANNEL, _delay)
+            move_arm(direction, _delay)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
@@ -543,20 +550,15 @@ class TrackerState(object):
             pretty_print_deg(angle)
             self.pos = angle
 
-    def armExt(self):
-        try:
-            move_arm(EXT_CHANNEL, self.step_delay)
-            GPIO.cleanup()
-        except KeyboardInterrupt:
-            GPIO.cleanup()
-        else:
-            # 1. wait for wabble to stop
-            wait_for_wobble_to_stop()
+            with open(HOME + "/drag.tab", "a") as fout:
+                dist = angle - angle_before
+                fout.write("{}\t{}\t{}\t{}\n".format(_delay, angle_before, angle, dist))
 
-            # 2. set pos to inclinometer angle
-            angle = get_line_and_parse()
-            pretty_print_deg(angle)
-            self.pos = angle
+    def armRet(self, delay=None):
+        self._arm(delay, RET_CHANNEL)
+
+    def armExt(self, delay=None):
+        self._arm(delay, EXT_CHANNEL)
 
     def toLowerExtreme(self, state):
         state.armRet(REWIND_SLEEP)

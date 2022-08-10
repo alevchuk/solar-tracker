@@ -5,7 +5,7 @@ import time
 
 ret_channel = 20
 ext_channel = 21
-sleep_time = 20
+sleep_time = 60
 
 def setup(channel):
     # GPIO setup
