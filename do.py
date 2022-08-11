@@ -614,22 +614,29 @@ def get_line_and_parse():
 
 
 if __name__ == "__main__":
+    SCAN_EVERY_N_SECONDS = 3600  # 1h
+
     state = TrackerState()
-    scan_every_n_moves = 100
-    n = 0
+    run_start = time.time()
+    remainder_s = SCAN_EVERY_N_SECONDS
+
     time.sleep(MEASURE_SLEEP)  # let reader thread get it's first measurement
-
-
-
     while(True):
-        n_remainder = n % scan_every_n_moves
-        print("{} of {} moves; {} left until next scan".format(
-                n_remainder, scan_every_n_moves, scan_every_n_moves - n_remainder))
+        prev_remainder_s = remainder_s
 
-        if n % scan_every_n_moves == 0:
-            found = doScan(state)
-            while(not found):
-                found = doScan(state)
+        # calc new remainder
+        elapsed_time = time.time() - run_start
+        remainder_s = elapsed_time % SCAN_EVERY_N_SECONDS
+        is_monotonic = (remainder_s > prev_remainder_s)
+        if is_monotonic:
+            print("{} of {} minutes; {} minutes left until next scan".format(
+                    *[int(x / 60) for x in [remainder_s, SCAN_EVERY_N_SECONDS, SCAN_EVERY_N_SECONDS - remainder_s]]))
+        else:
+            # remainder jumped, we're in a new era, time to do the scan
+            print("Time for a scan (debug: new remainder is {}s, prev remainder was {}s)".format(int(remainder_s), int(prev_remainder_s)))
+
+            found_max = doScan(state)
+            while(not found_max):
+                found_max = doScan(state)
 
         hill_climb(state)
-        n += 1
