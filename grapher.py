@@ -136,7 +136,7 @@ class LiveData(object):
             raise LiveDataError("Unknown exception: {}".format(msg))
 
 
-        if data["age"] > 60:
+        if data["age"] > 300:
             raise LiveDataStale("Age is {} seconds".format(data["age"]))
 
         return data
@@ -234,7 +234,7 @@ def main():
     screen = pygame.display.set_mode()
 
     print("[[[[[[[[[ Screen size: {} ]]]]]]]]]".format(screen.get_size()))
-    # my device scereen size is 800 x 480
+    # my device screen size is 800 x 480
     SCREEN_W = 800
     SCREEN_H = 240  # half height
     pygame.mouse.set_visible(False)
@@ -481,7 +481,7 @@ def main():
         # Save every frame
         frame_num += 1
         filename = VIDEO_FRAMES_DIR + ("/%06d.png" % (frame_num))
-        pygame.image.save(background, filename)
+        pygame.image.save(screen, filename)
 
 
     pygame.quit()
