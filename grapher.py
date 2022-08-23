@@ -38,7 +38,7 @@ BG_COLOR = pygame.Color("#000000")
 TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 
-LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
+LEVELS = [pygame.Color("#dcd0ff"), pygame.Color("#b75cff"), pygame.Color("#9a00eb")]  # Dark Purple
 HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
 
 NUM_LEVELS = 2
