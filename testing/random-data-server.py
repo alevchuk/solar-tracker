@@ -9,6 +9,15 @@ from http.server import HTTPServer
 
 import random
 
+MODE_HILL_CLIMB = "hill-climb"
+MODE_HILL_CLIMB_RET = "hill-climb-ret"
+MODE_HILL_CLIMB_EXT = "hill-climb-ext"
+MODE_SCAN_RESET = "scan-reset"
+MODE_SCAN_EXT = "scan-ext"
+MODE_SCAN_RET = "scan-ret"
+
+SCAN_DEG_START = 1
+SCAN_DEG_END = 60
 
 class RandomTestData(object):
     MAX_VALUE = 100
@@ -36,6 +45,7 @@ class RandomTestData(object):
             self.direction = "down"
 
         self.prev_value = new_value
+
         return new_value
 
 
@@ -48,6 +58,23 @@ class Metrics(object):
     def __init__(self):
         self.value = None
         self.last_updated = None
+        self.pos = SCAN_DEG_START
+        self.pos_direction = 'ext'
+
+    def setMode(self, value):
+        self.mode = mode
+
+    def updatePos(self):
+        if self.pos_direction == 'ext':
+            if self.pos < SCAN_DEG_END:
+                self.pos += 0.1
+            else:
+                self.pos_direction = 'ret'
+        else:
+            if self.pos > SCAN_DEG_START:
+                self.pos -= 0.1
+            else:
+                self.pos_direction = 'ext'
 
     def setValue(self, value):
         self.value = value
@@ -59,7 +86,9 @@ class Metrics(object):
             age = time.time() - self.last_updated
         return {
             'value': self.value,
-            'age': age
+            'age': age,
+            'mode': MODE_SCAN_EXT,
+            'pos': self.pos
         }
 
 METRICS = Metrics()
@@ -98,5 +127,6 @@ class MetricsListenerThread(threading.Thread):
 if __name__ == "__main__":
     generator = RandomTestData()
     while True:
+        METRICS.updatePos()
         METRICS.setValue(generator.next())
         time.sleep(0.1)

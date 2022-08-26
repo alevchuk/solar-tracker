@@ -25,7 +25,6 @@ except OSError:
 SCAN_NUM_MOVES = 100 # must match what's in the tracker (do.py)
 
 DATA_FETCH_PERIOD_MS = 100  # milliseconds
-HILL_CLIMB_MULT = 10  # resolution multiplier for hill climbing
 
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
@@ -40,11 +39,14 @@ TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 
 LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
+LEVELS = [pygame.Color("#3000F0"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
 HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
 
-NUM_LEVELS = 2
+NUM_LEVELS = 1
 LEVELS = LEVELS[0:NUM_LEVELS]
 HILL_CLIMB_LEVELS = HILL_CLIMB_LEVELS[0:NUM_LEVELS]
+
+POS_DEG_TO_GRAPH_RATIO = 1.5
 
 HILL_CLIMB_DOT = pygame.Color("#57F50A")
 
@@ -194,8 +196,8 @@ class DataFetcherThread(threading.Thread):
         self.start()
 
         self.liveData = RandomTestData()
-        self.liveData = LiveData(local=True)
         self.liveData = LiveData()
+        self.liveData = LiveData(local=True)
 
     def run(self):
         while (True):
@@ -348,7 +350,7 @@ def main():
         else:
             watts = trackerData["value"]
             mode = trackerData["mode"]
-            pos = trackerData["pos"] / HILL_CLIMB_MULT
+            pos = trackerData["pos"] * POS_DEG_TO_GRAPH_RATIO
             efficiency_pct = trackerData.get("efficiency_pct")
 
             value = (watts / LiveData.MAX_VALUE) * FG_H * len(LEVELS)

@@ -48,6 +48,7 @@ SCAN_DEG_START = 1
 SCAN_DEG_END = 60
 
 
+
 class Metrics(object):
     PORT = 9732
     ADDR = ('', PORT)
@@ -199,7 +200,7 @@ class SensorFetcherThread(threading.Thread):
 
             if not hide_metrics:
                 METRICS.setValue(measured_power / 1000)
-                METRICS.setPos(state.pos * 15)
+                METRICS.setPos(state.pos)
 
             if age > MEASURE_SLEEP:
                 return None
