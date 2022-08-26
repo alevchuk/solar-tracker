@@ -39,12 +39,15 @@ TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 
 LEVELS = [pygame.Color("#150050"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
-LEVELS = [pygame.Color("#3000F0"), pygame.Color("#3F0071"), pygame.Color("#610094")]  # Dark Purple
-HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
+#HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
 
-NUM_LEVELS = 1
-LEVELS = LEVELS[0:NUM_LEVELS]
-HILL_CLIMB_LEVELS = HILL_CLIMB_LEVELS[0:NUM_LEVELS]
+#NUM_LEVELS = 2
+#LEVELS = LEVELS[0:NUM_LEVELS]
+#HILL_CLIMB_LEVELS = HILL_CLIMB_LEVELS[0:NUM_LEVELS]
+
+DOT_COLOR = pygame.Color("#385000")
+SCAN_COLOR = "#3000a0"
+HIST_DOT_COLOR = "#385000"
 
 POS_DEG_TO_GRAPH_RATIO = 1.5
 
@@ -57,6 +60,48 @@ GRAPHER_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 if not os.path.isfile(GRAPHER_FONT):
     GRAPHER_FONT = None
 
+
+def _color_add(base, offset):
+	if 0 < base + offset < 256:
+		return base + offset
+	else:
+		return base
+
+class ColorShift(object):
+    def __init__(self, start_color):
+        if not start_color.startswith("#"):
+            raise "Expecting hex color for {}".format(start_color)
+
+        start_color = start_color[1:]
+        triplet = start_color[0:2], start_color[2:4], start_color[4:6]
+
+        self.base_color = [int(t, 16) for t in triplet]
+        self.c_current = 0
+        self.c_direction = 'up'
+        self.c_min = -20
+        self.c_max = 20
+
+    def next(self):
+        if self.c_direction == 'up':
+            if self.c_current < self.c_max:
+                self.c_current += 1
+            else:
+                self.c_direction = 'down'
+
+        if self.c_direction == 'down':
+            if self.c_current > self.c_min:
+                self.c_current -= 1
+            else:
+                self.c_direction = 'up'
+
+        hex_triplet = [hex(_color_add(c, self.c_current))[2:].zfill(2) for c in self.base_color]
+        print(hex_triplet)
+        print("#{}{}{}".format(*hex_triplet))
+        return pygame.Color("#{}{}{}".format(*hex_triplet))
+
+
+scanColorShift = ColorShift(SCAN_COLOR)
+histDotColorShift = ColorShift(HIST_DOT_COLOR)
 
 class RandomTestData(object):
     MAX_VALUE = 100
@@ -170,7 +215,7 @@ def draw_bar(pos, level, bar_height, bar_width, bar_color, chart):
     if level == 0:
         antibar_color = BG_COLOR
     else:
-        antibar_color = LEVELS[level - 1]
+        antibar_color = scanColorShift.next()
 
     antibar_height = chart.get_height() - bar_height
     antibar = pygame.Rect(pos * bar_width, 0, bar_width, antibar_height)
@@ -353,10 +398,10 @@ def main():
             pos = trackerData["pos"] * POS_DEG_TO_GRAPH_RATIO
             efficiency_pct = trackerData.get("efficiency_pct")
 
-            value = (watts / LiveData.MAX_VALUE) * FG_H * len(LEVELS)
+            value = (watts / LiveData.MAX_VALUE) * FG_H
             offset, level = levelChart.get_offset(value)
             bar_height = offset
-            bar_color = LEVELS[level]
+            bar_color = scanColorShift.next()
             bar_width = FG_W / SCAN_NUM_MOVES
 
             # clear background
@@ -388,7 +433,7 @@ def main():
                 dot_y = FG_H - bar_height
 
                 # main chart: historical dot
-                dot_color = HILL_CLIMB_LEVELS[level]
+                dot_color = histDotColorShift.next()
                 draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=7)
 
                 # main chart
@@ -413,7 +458,7 @@ def main():
                 offset = (x_offset, y_offset)
 
                 # zoom chart: historical dot
-                dot_color = HILL_CLIMB_LEVELS[level]
+                dot_color = DOT_COLOR
                 draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, bar_width * ZOOM_LEVEL, dot_color,
                     surf=zoomedUncroppedSurf, radius=5)
 
