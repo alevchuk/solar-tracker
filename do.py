@@ -60,6 +60,7 @@ class Metrics(object):
         self.mode = None
         self.pos = None
         self.efficiency_pct = None
+        self.wobble_data = None
 
     def setMode(self, mode):
         self.mode = mode
@@ -75,6 +76,9 @@ class Metrics(object):
     def setEfficiency(self, value):
         self.efficiency_pct = value
 
+    def setWobbleData(self, value):
+        self.wobble_data = value
+
     def getValue(self):
         age = None
         if self.last_updated:
@@ -87,7 +91,8 @@ class Metrics(object):
             'value': self.value,
             'age': age,
             'mode': self.mode,
-            'pos': self.pos
+            'pos': self.pos,
+            'wobble_data': self.wobble_data
         }
 
         if self.efficiency_pct is not None:
@@ -504,6 +509,20 @@ class TrackerState(object):
         self.scan_measurements = None
         self.angles_while_wobble = []
 
+        self.moves_count = 0
+        self.useful_total = 0
+        self.wobble_total = 0
+
+    def updateWobbleData(self, latest_dur, useful_time):
+        self.moves_count += 1
+        self.wobble_total += latest_dur
+        avg_dur = self.wobble_total / self.moves_count
+
+        self.useful_total += useful_time
+        time_loss_pct = (self.wobble_total / self.useful_total) * 100
+
+        METRICS.setWobbleData([latest_dur, avg_dur, time_loss_pct])
+
     def updateEfficiency(self, new_value):
         # check if efficiency cannot be calculated:
         # 1. if all scan measurements are similar that means panel is not getting sun or reflector is not adding light
@@ -544,7 +563,11 @@ class TrackerState(object):
             GPIO.cleanup()
         else:
             # 1. wait for wobble to stop
+            start_wobble_wait = time.time()
             wait_for_wobble_to_stop()
+            dur = time.time() - start_wobble_wait
+
+            self.updateWobbleData(dur, useful_time=_delay)
 
             # 2. set pos to inclinometer angle
             angle = get_line_and_parse()
