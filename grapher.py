@@ -95,8 +95,6 @@ class ColorShift(object):
                 self.c_direction = 'up'
 
         hex_triplet = [hex(_color_add(c, self.c_current))[2:].zfill(2) for c in self.base_color]
-        print(hex_triplet)
-        print("#{}{}{}".format(*hex_triplet))
         return pygame.Color("#{}{}{}".format(*hex_triplet))
 
 
@@ -282,7 +280,7 @@ def main():
 
     print("[[[[[[[[[ Screen size: {} ]]]]]]]]]".format(screen.get_size()))
     # my device screen size is 800 x 480
-    SCREEN_W = 800
+    SCREEN_W = 798
     SCREEN_H = 240  # half height
     pygame.mouse.set_visible(False)
 
@@ -397,6 +395,7 @@ def main():
             mode = trackerData["mode"]
             pos = trackerData["pos"] * POS_DEG_TO_GRAPH_RATIO
             efficiency_pct = trackerData.get("efficiency_pct")
+            wobble_data = trackerData.get("wobble_data")
 
             value = (watts / LiveData.MAX_VALUE) * FG_H
             offset, level = levelChart.get_offset(value)
@@ -504,12 +503,24 @@ def main():
 
                 # Efficiency
                 if efficiency_pct is not None:
-                    font = pygame.font.Font(GRAPHER_FONT, 56)
+                    font = pygame.font.Font(GRAPHER_FONT, 25)
                     text = "gain %d%%" % (efficiency_pct - 100)
                     effTextSurf = font.render(text, True, TEXT_COLOR)
                     text_width = effTextSurf.get_width()
                     textpos = effTextSurf.get_rect(
                         y=(5 + wattsTextPos.h),
+                        x=(SCREEN_W - text_width)
+                    )
+                    background.blit(effTextSurf, textpos)
+
+                # Wobble
+                if wobble_data is not None:
+                    font = pygame.font.Font(GRAPHER_FONT, 25)
+                    text = "wobble {}s {}s {}%".format(*[int(x) for x in wobble_data])
+                    effTextSurf = font.render(text, True, TEXT_COLOR)
+                    text_width = effTextSurf.get_width()
+                    textpos = effTextSurf.get_rect(
+                        y=(5 + wattsTextPos.h + 25),
                         x=(SCREEN_W - text_width)
                     )
                     background.blit(effTextSurf, textpos)

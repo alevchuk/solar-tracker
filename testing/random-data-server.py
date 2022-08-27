@@ -88,7 +88,9 @@ class Metrics(object):
             'value': self.value,
             'age': age,
             'mode': MODE_SCAN_EXT,
-            'pos': self.pos
+            'pos': self.pos,
+            'efficiency_pct': 199,
+            'wobble_data': [12, 34, 56],
         }
 
 METRICS = Metrics()
