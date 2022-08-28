@@ -45,13 +45,14 @@ MODE_SCAN_RET = "scan-ret"
 RET_CHANNEL = 20
 EXT_CHANNEL = 21
 
-
+EXACT_MOVE_PRECISION = 0.05
+INEXACT_DIST_OVER_TIME_RATIO = 0.951497
 
 MEASURE_SLEEP = 0.6
 
 OPTIMA_SAMPLES = 8
 
-REWIND_SLEEP = 6
+REWIND_DEG = 6
 SCAN_DEG_START = 1
 SCAN_DEG_END = 60
 
@@ -192,9 +193,9 @@ def pretty_print_pow(measured_power):
     log(label + ("*" * int(term_width * ratio)))
 
 
-LAST_SENSOR_READ = None
+LAST_WATTS_READ = None
 
-class SensorFetcherThread(threading.Thread):
+class WattsFetcherThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.daemon = True
@@ -254,27 +255,27 @@ class SensorFetcherThread(threading.Thread):
             time.sleep(MEASURE_SLEEP)
 
 # Run in the background
-LAST_SENSOR_READ = SensorFetcherThread()
+LAST_WATTS_READ = WattsFetcherThread()
 
 def further(state):
     if state.attemted_direction == "ret":
         METRICS.setMode(MODE_HILL_CLIMB_RET)
+        log("<== Try Ret")
         state.armRet()
-        log("Try Ret")
     else:
         METRICS.setMode(MODE_HILL_CLIMB_EXT)
+        log("==> Try Ext")
         state.armExt()
-        log("Try Ext")
 
 def undo(state):
     if state.attemted_direction == "ret":
         METRICS.setMode(MODE_HILL_CLIMB_EXT)
+        log("U<= Undo Ret")
         state.armExt()
-        log("Undo Ret")
     else:
         METRICS.setMode(MODE_HILL_CLIMB_RET)
+        log("=>U Undo Ext")
         state.armRet()
-        log("Undo Ext")
 
 def hill_climb(state):
     log(state.descision_history)
@@ -282,7 +283,7 @@ def hill_climb(state):
     power_before = None
     while (power_before is None):
         time.sleep(MEASURE_SLEEP)
-        power_before = LAST_SENSOR_READ.read(state)
+        power_before = LAST_WATTS_READ.read(state)
 
     # Try
     further(state)
@@ -290,7 +291,7 @@ def hill_climb(state):
     power_after = None
     while (power_after is None):
         time.sleep(MEASURE_SLEEP)
-        power_after = LAST_SENSOR_READ.read(state)
+        power_after = LAST_WATTS_READ.read(state)
 
     # log("Power before: {}   <=> Power after {}".format(power_before, power_after))
     state.updateEfficiency(power_after)
@@ -307,7 +308,7 @@ def hill_climb(state):
         power_on_the_filp_side = None
         while (power_on_the_filp_side is None):
             time.sleep(MEASURE_SLEEP)
-            power_on_the_filp_side = LAST_SENSOR_READ.read(state)
+            power_on_the_filp_side = LAST_WATTS_READ.read(state)
 
         if power_before - power_on_the_filp_side < (power_after - power_before) * 0.9:
             log("Anti-improvement of %.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
@@ -324,13 +325,13 @@ def hill_climb(state):
         power_before = None
         while (power_before is None):
             time.sleep(MEASURE_SLEEP)
-            power_before = LAST_SENSOR_READ.read(state)
+            power_before = LAST_WATTS_READ.read(state)
 
         undo(state)
         power_after = None
         while (power_after is None):
             time.sleep(MEASURE_SLEEP)
-            power_after = LAST_SENSOR_READ.read(state)
+            power_after = LAST_WATTS_READ.read(state)
 
         if power_after - power_before < 0:
             log("Reversing also does not make sense. Maybe a cloud?")
@@ -343,7 +344,7 @@ def hill_climb(state):
             power_on_the_filp_side = None
             while (power_on_the_filp_side is None):
                 time.sleep(MEASURE_SLEEP)
-                power_on_the_filp_side = LAST_SENSOR_READ.read(state)
+                power_on_the_filp_side = LAST_WATTS_READ.read(state)
 
             if power_on_the_filp_side - power_before > abs(power_after - power_before) * 0.9:
                 # Reverse directions
@@ -393,9 +394,9 @@ def doScan(state):
     scan_measurements = []
     log("Starting scan")
     while state.pos < SCAN_DEG_END:
-        state.armExt()
+        state.armExt(exact=False)
         time.sleep(MEASURE_SLEEP)
-        m = LAST_SENSOR_READ.read(state)
+        m = LAST_WATTS_READ.read(state)
         if m is not None:
             scan_measurements.append(m)
             if m > max_measured_power:
@@ -429,7 +430,7 @@ def doScan(state):
             actual_hill_pos = state.pos
             break
 
-        state.armRet()
+        state.armRet(exact=False)
 
         # so we don't mark data as stale
         METRICS.setValue(max_measured_power / 1000)
@@ -507,7 +508,7 @@ def pretty_print_deg(angle_degrees):
 
 class TrackerState(object):
     def __init__(self):
-        self.step_delay = 0.5
+        self.step_deg = 0.5
         self.descision_history = []
         self.attemted_direction = "ext"
         self.pos = 0
@@ -554,16 +555,23 @@ class TrackerState(object):
             efficiency_pct = (new_value / self.start_of_scan) * 100
             METRICS.setEfficiency(efficiency_pct)
 
-    def _arm(self, delay, direction):
-        if delay is not None:
-            _delay = delay
+    def _flip_dir(self, direction):
+        if direction == EXT_CHANNEL:
+            return RET_CHANNEL
         else:
-            _delay = self.step_delay
+            return EXT_CHANNEL
+
+    def _arm(self, distance_deg, direction, exact):
+        if distance_deg is None:
+            distance_deg = self.step_deg
+
+        delay = distance_deg / INEXACT_DIST_OVER_TIME_RATIO
+        log("Requested: {:0.3f} degrees ({:0.3f}s)".format(distance_deg, delay))
 
         angle_before = get_line_and_parse()
 
         try:
-            move_arm(direction, _delay)
+            move_arm(direction, delay)
             GPIO.cleanup()
         except KeyboardInterrupt:
             GPIO.cleanup()
@@ -573,28 +581,54 @@ class TrackerState(object):
             wait_for_wobble_to_stop()
             dur = time.time() - start_wobble_wait
 
-            self.updateWobbleData(dur, useful_time=_delay)
-
             # 2. set pos to inclinometer angle
             angle = get_line_and_parse()
             pretty_print_deg(angle)
             self.pos = angle
 
+            # 3. update Wobble data
+            self.updateWobbleData(dur, useful_time=delay)
+
+            # 4. take a watts reading for the grapher
+            LAST_WATTS_READ.read(state)
+
+            # 5. write angle data to a file
             with open(HOME + "/drag.tab", "a") as fout:
                 dist = angle - angle_before
-                fout.write("{}\t{}\t{}\t{}\n".format(_delay, angle_before, angle, dist))
+                fout.write("{}\t{}\t{}\t{}\n".format(delay, angle_before, angle, dist))
 
-    def armRet(self, delay=None):
-        self._arm(delay, RET_CHANNEL)
+            # 6. recursive call to adjust to desired precision
+            if exact:
+                dir_mult = (1 if direction == EXT_CHANNEL else -1)
+                target = angle_before + distance_deg * dir_mult
+                error_deg = target - angle
 
-    def armExt(self, delay=None):
-        self._arm(delay, EXT_CHANNEL)
+                actual_delta = angle - angle_before
+                if abs(error_deg) < EXACT_MOVE_PRECISION:
+                    verdict = "GOOD"
+                else:
+                    verdict = "correcting..."
+
+                log("Exact angles: requested delta {:0.3f}, actual delta {:0.3f}, was off by {:0.3f} ({})".format(
+                    distance_deg * dir_mult, actual_delta, error_deg, verdict))
+                if abs(error_deg) < EXACT_MOVE_PRECISION:
+                    return
+                if error_deg < 0:
+                    direction = self._flip_dir(direction)
+                    error_deg = -error_deg
+                self._arm(error_deg, direction, exact)
+
+    def armRet(self, deg=None, exact=True):
+        self._arm(deg, RET_CHANNEL, exact)
+
+    def armExt(self, deg=None, exact=True):
+        self._arm(deg, EXT_CHANNEL, exact)
 
     def toLowerExtreme(self, state):
-        state.armRet(REWIND_SLEEP)
+        state.armRet(REWIND_DEG, exact=False)
 
         while state.pos > SCAN_DEG_START:
-            state.armRet(REWIND_SLEEP)
+            state.armRet(REWIND_DEG, exact=False)
 
         state.start_of_scan = None
         METRICS.setEfficiency(None)
