@@ -24,6 +24,14 @@ import os
 
 HOME = os.path.expanduser("~")
 
+START_TIME = time.time()
+def log(text):
+    seconds_since_start = time.time() - START_TIME
+    minutes = int(seconds_since_start / 60)
+    hours = int(minutes / 60)
+    seconds = seconds_since_start % 60
+
+    print("[{: >2}h {: >2}m {:0>6}s] {}".format(hours, minutes, "{:0.3f}".format(seconds), text))
 
 SENSOR_PORT = 2017
 
@@ -118,7 +126,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
         # for k, v in response_obj.items():
         #     if k != "value":
         #         new_obj[k] = v
-        # print("{}\t{}".format(new_obj, value))
+        # log("{}\t{}".format(new_obj, value))
 
     def log_message(self, *args):
         pass
@@ -171,18 +179,17 @@ MAX_EXPECTED_AMPS = 100
 SHUNT_OHMS = (SHUNT_MV / 1000) / MAX_EXPECTED_AMPS  # R = V / i
 
 #SHUNT_OHMS = 0.00075
-print("Shunt resistance: {} ohms".format(SHUNT_OHMS))
+log("Shunt resistance: {} ohms".format(SHUNT_OHMS))
 
 
 def pretty_print_pow(measured_power):
-    label = "Power: %.3f W" % (measured_power / 1000)
-    print(label, end = " ")
+    label = "Power: %.3f W " % (measured_power / 1000)
     term_width = get_terminal_size()[0] - len(label) - 1
     ratio = (measured_power / 1000) / 100
     if ratio > 1:
         ratio = 1
 
-    print("*" * int(term_width * ratio))
+    log(label + ("*" * int(term_width * ratio)))
 
 
 LAST_SENSOR_READ = None
@@ -223,18 +230,18 @@ class SensorFetcherThread(threading.Thread):
                 ina.configure(voltage_range=ina.RANGE_32V)
 
                 if not ina.is_conversion_ready():
-                    print("INA Conversion not ready, sleeping for 100ms")
+                    log("INA Conversion not ready, sleeping for 100ms")
                     time.sleep(0.1)
                     continue
 
                 measured_power = ina.power()  # Power in milliwatts
 
-                # print(ina.voltage()) ?
+                # log(ina.voltage()) ?
 
                 return measured_power
 
             except Exception as e:
-                print("Exception when reading from INA, {}".format(e))
+                log("Exception when reading from INA, {}".format(e))
 
             time.sleep(0.2)
 
@@ -253,24 +260,24 @@ def further(state):
     if state.attemted_direction == "ret":
         METRICS.setMode(MODE_HILL_CLIMB_RET)
         state.armRet()
-        print("Try Ret")
+        log("Try Ret")
     else:
         METRICS.setMode(MODE_HILL_CLIMB_EXT)
         state.armExt()
-        print("Try Ext")
+        log("Try Ext")
 
 def undo(state):
     if state.attemted_direction == "ret":
         METRICS.setMode(MODE_HILL_CLIMB_EXT)
         state.armExt()
-        print("Undo Ret")
+        log("Undo Ret")
     else:
         METRICS.setMode(MODE_HILL_CLIMB_RET)
         state.armRet()
-        print("Undo Ext")
+        log("Undo Ext")
 
 def hill_climb(state):
-    print(state.descision_history)
+    log(state.descision_history)
 
     power_before = None
     while (power_before is None):
@@ -285,13 +292,13 @@ def hill_climb(state):
         time.sleep(MEASURE_SLEEP)
         power_after = LAST_SENSOR_READ.read(state)
 
-    # print("Power before: {}   <=> Power after {}".format(power_before, power_after))
+    # log("Power before: {}   <=> Power after {}".format(power_before, power_after))
     state.updateEfficiency(power_after)
     METRICS.setMode(MODE_HILL_CLIMB)
 
     descision = state.attemted_direction
     if power_after - power_before > 0:
-        print("We have improvement of +%.3f mW !" % (power_after - power_before))
+        log("We have improvement of +%.3f mW !" % (power_after - power_before))
         # we still need to test for ani-imporvment to avoid getting tricked by clouds
 
         undo(state)
@@ -303,7 +310,7 @@ def hill_climb(state):
             power_on_the_filp_side = LAST_SENSOR_READ.read(state)
 
         if power_before - power_on_the_filp_side < (power_after - power_before) * 0.9:
-            print("Anti-improvement of %.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
+            log("Anti-improvement of %.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
             further(state)
             descision = "stay"
         else:
@@ -326,11 +333,11 @@ def hill_climb(state):
             power_after = LAST_SENSOR_READ.read(state)
 
         if power_after - power_before < 0:
-            print("Reversing also does not make sense. Maybe a cloud?")
+            log("Reversing also does not make sense. Maybe a cloud?")
             further(state)
             descision = "stay"
         else:
-            print("We have improvement of +%.3f mW when revrsing !" % (power_after - power_before))
+            log("We have improvement of +%.3f mW when revrsing !" % (power_after - power_before))
             # we still need to test for ani-imporvment to avoid getting tricked by clouds
 
             power_on_the_filp_side = None
@@ -345,7 +352,7 @@ def hill_climb(state):
                 else:
                     state.attemted_direction = "ret"
             else:
-                print("Anti-improvement of +%.3f mW is not sufficient! Maybe a cloud?" % (power_on_the_filp_side - power_before))
+                log("Anti-improvement of +%.3f mW is not sufficient! Maybe a cloud?" % (power_on_the_filp_side - power_before))
                 further(state)
                 descision = "stay"
 
@@ -365,7 +372,7 @@ def remove_outliers(measurements):
         for i in measurements:
             if i < median_measurement - delta or i > median_measurement + delta:
                 human_measurements = ["%.3f" % (i / 1000) for i in measurements]
-                print("OUTLIER: dropping {} from {}".format("%.3f" % (i / 1000), human_measurements))
+                log("OUTLIER: dropping {} from {}".format("%.3f" % (i / 1000), human_measurements))
                 continue  # ignore this measurement
             no_outliers.append(i)
 
@@ -377,14 +384,14 @@ def doScan(state):
     Returns True if the hill is found
     """
     METRICS.setMode(MODE_SCAN_RESET)
-    print("Moving to lower extreme")
+    log("Moving to lower extreme")
     state.toLowerExtreme(state)
     # scan
     METRICS.setMode("scan-ext")
     max_measured_power = 0
     hill_pos = 0
     scan_measurements = []
-    print("Starting scan")
+    log("Starting scan")
     while state.pos < SCAN_DEG_END:
         state.armExt()
         time.sleep(MEASURE_SLEEP)
@@ -401,7 +408,7 @@ def doScan(state):
         state.start_of_scan = state.scan_measurements[0]
         state.updateEfficiency(max(state.scan_measurements))
 
-    print("Max found: %.3f W at %.3f degrees" % (max_measured_power / 1000, hill_pos))
+    log("Max found: %.3f W at %.3f degrees" % (max_measured_power / 1000, hill_pos))
 
     # localize to be on top of the hill
     found_hill = False
@@ -429,14 +436,14 @@ def doScan(state):
         METRICS.setPos(hill_pos * 15)
 
     if found_hill:
-        print("Hill found: {}W".format(int(max_measured_power / 1000)))
-        print("Optima search position was {} while the localization postion was {}".format(hill_pos, actual_hill_pos))
+        log("Hill found: {}W".format(int(max_measured_power / 1000)))
+        log("Optima search position was {} while the localization postion was {}".format(hill_pos, actual_hill_pos))
         pretty_print_pow(max_measured_power)
-        print()
+        log()
 
     else:
-        print("Hill NOT found! Was looking for {}W at position: {}".format(int(max_measured_power / 1000), hill_pos))
-        print("Instead the largest we got was: {}W".format(int(max_power_seen_during_localization / 1000)))
+        log("Hill NOT found! Was looking for {}W at position: {}".format(int(max_measured_power / 1000), hill_pos))
+        log("Instead the largest we got was: {}W".format(int(max_power_seen_during_localization / 1000)))
 
     return found_hill
 
@@ -492,11 +499,10 @@ def wait_for_wobble_to_stop():
             break
 
 def pretty_print_deg(angle_degrees):
-    label = "Angle (degrees): %.3f" % angle_degrees
-    print(label, end = " ")
+    label = "Angle (degrees): %.3f " % angle_degrees
     term_width = get_terminal_size()[0] - len(label) - 1
     ratio = (angle_degrees) / 180
-    print("*" * int(term_width * ratio))
+    log(label + ("*" * int(term_width * ratio)))
 
 
 class TrackerState(object):
@@ -536,12 +542,12 @@ class TrackerState(object):
         avg_m = sum(state.scan_measurements) / len(state.scan_measurements)
         max_m = max(state.scan_measurements)
         if max_m < avg_m * 1.01:
-            print("CANNOT updateEfficiency: scan too flat")
+            log("CANNOT updateEfficiency: scan too flat")
             return
 
         left_most = state.scan_measurements[0]
         if left_most > max_m * 0.95:
-            print("CANNOT updateEfficiency: max is too close to the left extreme: left is {}; max is {}".format(int(left_most / 1000), int(max_m / 1000)))
+            log("CANNOT updateEfficiency: max is too close to the left extreme: left is {}; max is {}".format(int(left_most / 1000), int(max_m / 1000)))
             return
 
         if self.start_of_scan is not None and self.start_of_scan != 0:
@@ -606,8 +612,8 @@ def get_line_and_parse():
         ts, x, y, z, angle, crc_ok_rate, sto = line.split(b'\t')
         angle = float(angle)
     except Exception as e:
-        print("ERROR: cold not get incli data: {}".format(e))
-        print(e)
+        log("ERROR: cold not get incli data: {}".format(e))
+        log(e)
         raise e
     else:
         return angle
@@ -617,7 +623,6 @@ if __name__ == "__main__":
     SCAN_EVERY_N_SECONDS = 3600  # 1h
 
     state = TrackerState()
-    run_start = time.time()
     remainder_s = SCAN_EVERY_N_SECONDS
 
     time.sleep(MEASURE_SLEEP)  # let reader thread get it's first measurement
@@ -625,15 +630,15 @@ if __name__ == "__main__":
         prev_remainder_s = remainder_s
 
         # calc new remainder
-        elapsed_time = time.time() - run_start
+        elapsed_time = time.time() - START_TIME
         remainder_s = elapsed_time % SCAN_EVERY_N_SECONDS
         is_monotonic = (remainder_s > prev_remainder_s)
         if is_monotonic:
-            print("{} of {} minutes; {} minutes left until next scan".format(
+            log("{} of {} minutes; {} minutes left until next scan".format(
                     *[int(x / 60) for x in [remainder_s, SCAN_EVERY_N_SECONDS, SCAN_EVERY_N_SECONDS - remainder_s]]))
         else:
             # remainder jumped, we're in a new era, time to do the scan
-            print("Time for a scan (debug: new remainder is {}s, prev remainder was {}s)".format(int(remainder_s), int(prev_remainder_s)))
+            log("Time for a scan (debug: new remainder is {}s, prev remainder was {}s)".format(int(remainder_s), int(prev_remainder_s)))
 
             found_max = doScan(state)
             while(not found_max):
