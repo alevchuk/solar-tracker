@@ -490,7 +490,7 @@ def main():
             background.blit(fgSurf, (0, SCREEN_H - FG_H))
 
             # put text on the background
-            if pygame.font and watts:
+            if pygame.font and watts is not None:
                 # Watts
                 font = pygame.font.Font(GRAPHER_FONT, 60)
                 text = "{}W".format(int(watts))
