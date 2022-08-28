@@ -439,7 +439,7 @@ def doScan(state):
         log("Hill found: {}W".format(int(max_measured_power / 1000)))
         log("Optima search position was {} while the localization postion was {}".format(hill_pos, actual_hill_pos))
         pretty_print_pow(max_measured_power)
-        log()
+        log("")
 
     else:
         log("Hill NOT found! Was looking for {}W at position: {}".format(int(max_measured_power / 1000), hill_pos))
