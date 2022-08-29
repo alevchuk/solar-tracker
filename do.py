@@ -27,7 +27,7 @@ HOME = os.path.expanduser("~")
 START_TIME = time.time()
 def log(text):
     seconds_since_start = time.time() - START_TIME
-    minutes = int(seconds_since_start / 60)
+    minutes = int(seconds_since_start / 60) % 60
     hours = int(minutes / 60)
     seconds = seconds_since_start % 60
 
