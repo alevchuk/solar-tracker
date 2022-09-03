@@ -38,16 +38,15 @@ BG_COLOR = pygame.Color("#000000")
 TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 
-LEVELS = [pygame.Color("#dcd0ff"), pygame.Color("#b75cff"), pygame.Color("#9a00eb")]  # Dark Purple
-HILL_CLIMB_LEVELS = [pygame.Color("#385000"), pygame.Color("#327100"), pygame.Color("#339400")]
+LEVELS = [pygame.Color("#9055A2"), pygame.Color("#D499B9"), pygame.Color("#E8C1C5")]
+HILL_CLIMB_LEVELS = [pygame.Color("#6F7C12"), pygame.Color("#8CFF98"), pygame.Color("#AAD922")]
 
-NUM_LEVELS = 2
+NUM_LEVELS = 3
 LEVELS = LEVELS[0:NUM_LEVELS]
 HILL_CLIMB_LEVELS = HILL_CLIMB_LEVELS[0:NUM_LEVELS]
 
 DOT_COLOR = pygame.Color("#385000")
-SCAN_COLOR = "#3000a0"
-HIST_DOT_COLOR = "#385000"
+HIST_DOT_COLOR = "#385001"  # will be used in ColorShift
 
 POS_DEG_TO_GRAPH_RATIO = 1.5
 
@@ -402,6 +401,7 @@ def main():
             offset, level = levelChart.get_offset(value)
             bar_height = offset
             bar_color = LEVELS[level]
+            dot_color = HILL_CLIMB_LEVELS[level]
             bar_width = FG_W / SCAN_NUM_MOVES
 
             # clear background
@@ -433,15 +433,13 @@ def main():
                 dot_y = FG_H - bar_height
 
                 # main chart: historical dot
-                dot_color = HILL_CLIMB_LEVELS[level]
                 draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=7)
 
                 # main chart
                 fgSurf.blit(bar_dot_chart, (0, 0))
 
                 # latest dot
-                dot_color = HILL_CLIMB_LEVELS[level]
-                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=fgSurf, radius=12)
+                draw_dot(dot_x, dot_y, bar_width, HILL_CLIMB_DOT, surf=fgSurf, radius=12)
                 border_w = ZOOM_W / ZOOM_LEVEL
                 border_h = ZOOM_H / ZOOM_LEVEL
                 border_left = dot_x - border_w / 2
@@ -458,7 +456,6 @@ def main():
                 offset = (x_offset, y_offset)
 
                 # zoom chart: historical dot
-                dot_color = DOT_COLOR
                 draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, bar_width * ZOOM_LEVEL, dot_color,
                     surf=zoomedUncroppedSurf, radius=5)
 
