@@ -38,15 +38,16 @@ BG_COLOR = pygame.Color("#000000")
 TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 
-LEVELS = [pygame.Color("#9055A2"), pygame.Color("#D499B9"), pygame.Color("#E8C1C5")]
-HILL_CLIMB_LEVELS = [pygame.Color("#6F7C12"), pygame.Color("#8CFF98"), pygame.Color("#AAD922")]
+LEVELS_RAW = ["#9055A2", "#D499B9", "#E8C1C5"]
+LEVELS = [pygame.Color(x) for x in LEVELS_RAW]
+HILL_CLIMB_LEVELS_RAW = ["#6F7C12", "#8CFF98", "#AAD922"]
+HILL_CLIMB_LEVELS = [pygame.Color(x) for x in HILL_CLIMB_LEVELS_RAW]
 
-NUM_LEVELS = 3
+NUM_LEVELS = 1
 LEVELS = LEVELS[0:NUM_LEVELS]
 HILL_CLIMB_LEVELS = HILL_CLIMB_LEVELS[0:NUM_LEVELS]
 
 DOT_COLOR = pygame.Color("#385000")
-HIST_DOT_COLOR = "#385001"  # will be used in ColorShift
 
 POS_DEG_TO_GRAPH_RATIO = 1.5
 
@@ -61,45 +62,37 @@ if not os.path.isfile(GRAPHER_FONT):
 
 
 def _color_add(base, offset):
-	if 0 < base + offset < 256:
-		return base + offset
-	else:
-		return base
+    if 0 < (base + offset) < 256:
+        return base + offset
+    else:
+        return base
 
 class ColorShift(object):
     def __init__(self, start_color):
         if not start_color.startswith("#"):
-            raise "Expecting hex color for {}".format(start_color)
+            raise Exception("Expecting hex color for {}".format(start_color))
 
-        start_color = start_color[1:]
+        start_color = start_color[1:]  # chop off the "#"
         triplet = start_color[0:2], start_color[2:4], start_color[4:6]
 
         self.base_color = [int(t, 16) for t in triplet]
-        self.c_current = 0
-        self.c_direction = 'up'
-        self.c_min = -20
-        self.c_max = 20
+        self.offset_current = 0
+        self.offset_min = 0
+        self.offset_max = 100
 
     def next(self):
-        if self.c_direction == 'up':
-            if self.c_current < self.c_max:
-                self.c_current += 1
-            else:
-                self.c_direction = 'down'
+        if self.offset_current < self.offset_max:
+            self.offset_current += 1
+        else:
+            self.offset_current = 0
 
-        if self.c_direction == 'down':
-            if self.c_current > self.c_min:
-                self.c_current -= 1
-            else:
-                self.c_direction = 'up'
-
-        hex_triplet = [hex(_color_add(c, self.c_current))[2:].zfill(2) for c in self.base_color]
+        hex_triplet = [hex(_color_add(c, self.offset_current))[2:].zfill(2) for c in self.base_color]
         return pygame.Color("#{}{}{}".format(*hex_triplet))
 
 
 # TODO: after removing LEVELS, add this only to historical dots (in main and zoom)
 # Rational: makes it possible to tell which historical dots are newer
-histDotColorShift = ColorShift(HIST_DOT_COLOR)
+histDotColorShift = ColorShift(str(HILL_CLIMB_LEVELS_RAW[0]))
 
 class RandomTestData(object):
     MAX_VALUE = 100
@@ -433,7 +426,8 @@ def main():
                 dot_y = FG_H - bar_height
 
                 # main chart: historical dot
-                draw_dot(dot_x, dot_y, bar_width, dot_color, surf=bar_dot_chart, radius=7)
+                hist_dot_color = histDotColorShift.next()
+                draw_dot(dot_x, dot_y, bar_width, hist_dot_color, surf=bar_dot_chart, radius=7)
 
                 # main chart
                 fgSurf.blit(bar_dot_chart, (0, 0))
@@ -456,7 +450,7 @@ def main():
                 offset = (x_offset, y_offset)
 
                 # zoom chart: historical dot
-                draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, bar_width * ZOOM_LEVEL, dot_color,
+                draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, bar_width * ZOOM_LEVEL, hist_dot_color,
                     surf=zoomedUncroppedSurf, radius=5)
 
                 zoomSurf.fill(BG_COLOR)

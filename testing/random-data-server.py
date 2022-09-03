@@ -138,29 +138,32 @@ class MetricsListenerThread(threading.Thread):
 
 
 if __name__ == "__main__":
-    SCAN_EVERY_N_SECONDS = 20
+    SCAN_SECONDS = 15
+    HILL_CLIMB_SECONDS = 60
+    METRICS.setMode(MODE_SCAN_EXT)  # start with a scan
 
+    remainder1_s = SCAN_SECONDS
+    remainder2_s = HILL_CLIMB_SECONDS
     generator = RandomTestData()
-    remainder_s = SCAN_EVERY_N_SECONDS
 
     while True:
-        prev_remainder_s = remainder_s
-
-        # calc new remainder
         elapsed_time = time.time() - START_TIME
-        remainder_s = elapsed_time % SCAN_EVERY_N_SECONDS
-        is_monotonic = (remainder_s > prev_remainder_s)
-        if is_monotonic:
-            print("{} of {} seconds; {} seconds left until next switch".format(
-                    *[int(x) for x in [remainder_s, SCAN_EVERY_N_SECONDS, SCAN_EVERY_N_SECONDS - remainder_s]]))
-
-        else:
-            # remainder jumped, we're in a new era, time to do the scan
-            print("Time to switch (debug: new remainder is {}s, prev remainder was {}s)".format(int(remainder_s), int(prev_remainder_s)))
-            if METRICS.mode == MODE_SCAN_EXT:
+        if METRICS.mode == MODE_SCAN_EXT:
+            # calc new remainder
+            prev_remainder1_s = remainder1_s
+            remainder1_s = elapsed_time % SCAN_SECONDS
+            is_monotonic1 = (remainder1_s > prev_remainder1_s)
+            if not is_monotonic1:
+                # remainder jumped, we're in a new era
                 METRICS.setMode(MODE_HILL_CLIMB)
-            else:
+        else:
+            # calc new remainder
+            prev_remainder2_s = remainder2_s
+            remainder2_s = elapsed_time % HILL_CLIMB_SECONDS
+            is_monotonic2 = (remainder2_s > prev_remainder2_s)
+            if not is_monotonic2:
                 METRICS.setMode(MODE_SCAN_EXT)
+
 
         METRICS.updatePos()
         METRICS.setValue(generator.next())
