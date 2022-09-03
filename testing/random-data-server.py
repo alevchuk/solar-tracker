@@ -138,7 +138,7 @@ class MetricsListenerThread(threading.Thread):
 
 
 if __name__ == "__main__":
-    SCAN_EVERY_N_SECONDS = 15
+    SCAN_EVERY_N_SECONDS = 20
 
     generator = RandomTestData()
     remainder_s = SCAN_EVERY_N_SECONDS

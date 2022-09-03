@@ -33,7 +33,7 @@ MODE_SCAN_RESET = "scan-reset"
 MODE_SCAN_EXT = "scan-ext"
 MODE_SCAN_RET = "scan-ret"
 
-ZOOM_LEVEL = 3
+ZOOM_LEVEL = 5
 BG_COLOR = pygame.Color("#000000")
 TEXT_COLOR = pygame.Color("#FFFFFF")
 TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
@@ -291,7 +291,7 @@ def main():
 
     # Foreground Surface
     FG_W = SCREEN_W - 3
-    FG_H = SCREEN_H * 0.4 - 1  # foreground takes bottom 40%
+    FG_H = SCREEN_H * 0.6 - 1  # foreground takes bottom % of vertical space
     fgSurf = pygame.Surface((FG_W, FG_H))
     fgSurf = fgSurf.convert()
     fgSurf.fill(BG_COLOR)
@@ -310,8 +310,8 @@ def main():
     errSurf.fill(BG_COLOR)
 
     # Zoom Surface
-    ZOOM_H = SCREEN_H * 0.4 # zoom window is on the top 40%
-    ZOOM_W = ZOOM_H  # zoom window is sqaure
+    ZOOM_H = SCREEN_H - FG_H - 2  # take the rest of vertical space
+    ZOOM_W = SCREEN_W * 0.6
     zoomSurf = pygame.Surface((ZOOM_W, ZOOM_H))
     zoomSurf = errSurf.convert()  # ??
     zoomSurf.fill(BG_COLOR)
