@@ -9,6 +9,8 @@ from http.server import HTTPServer
 
 import random
 
+START_TIME = time.time()
+
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
@@ -28,12 +30,12 @@ class RandomTestData(object):
 
     def next(self):
         delta = random.random() - 0.5
-        if self.direction == "up":
-            if delta > 0:
-                delta *= 2
-        else:
-            if delta < 0:
-                delta *= 2
+
+        if METRICS.mode.startswith(MODE_HILL_CLIMB):
+            delta /= 50
+
+        if (self.direction == "up" and delta > 0) or (self.direction == "down" and delta < 0):
+            delta *= 2
 
         new_value = self.prev_value + delta * 5
         if new_value < 0:
@@ -49,7 +51,6 @@ class RandomTestData(object):
         return new_value
 
 
-
 class Metrics(object):
     PORT = 9732
     ADDR = ('0.0.0.0', PORT)
@@ -60,11 +61,21 @@ class Metrics(object):
         self.last_updated = None
         self.pos = SCAN_DEG_START
         self.pos_direction = 'ext'
+        self.mode = MODE_SCAN_EXT
 
     def setMode(self, value):
-        self.mode = mode
+        self.mode = value
 
     def updatePos(self):
+        step_size = 0.1
+
+        if self.mode.startswith(MODE_HILL_CLIMB):
+            step_size /= 100
+            if random.random() > 0.5:
+                self.pos_direction = 'ret'
+            else:
+                self.pos_direction = 'ext'
+
         if self.pos_direction == 'ext':
             if self.pos < SCAN_DEG_END:
                 self.pos += 0.1
@@ -87,7 +98,7 @@ class Metrics(object):
         return {
             'value': self.value,
             'age': age,
-            'mode': MODE_SCAN_EXT,
+            'mode': self.mode,
             'pos': self.pos,
             'efficiency_pct': 199,
             'wobble_data': [12, 34, 56],
@@ -127,8 +138,30 @@ class MetricsListenerThread(threading.Thread):
 
 
 if __name__ == "__main__":
+    SCAN_EVERY_N_SECONDS = 15
+
     generator = RandomTestData()
+    remainder_s = SCAN_EVERY_N_SECONDS
+
     while True:
+        prev_remainder_s = remainder_s
+
+        # calc new remainder
+        elapsed_time = time.time() - START_TIME
+        remainder_s = elapsed_time % SCAN_EVERY_N_SECONDS
+        is_monotonic = (remainder_s > prev_remainder_s)
+        if is_monotonic:
+            print("{} of {} seconds; {} seconds left until next switch".format(
+                    *[int(x) for x in [remainder_s, SCAN_EVERY_N_SECONDS, SCAN_EVERY_N_SECONDS - remainder_s]]))
+
+        else:
+            # remainder jumped, we're in a new era, time to do the scan
+            print("Time to switch (debug: new remainder is {}s, prev remainder was {}s)".format(int(remainder_s), int(prev_remainder_s)))
+            if METRICS.mode == MODE_SCAN_EXT:
+                METRICS.setMode(MODE_HILL_CLIMB)
+            else:
+                METRICS.setMode(MODE_SCAN_EXT)
+
         METRICS.updatePos()
         METRICS.setValue(generator.next())
         time.sleep(0.1)

@@ -240,8 +240,8 @@ class DataFetcherThread(threading.Thread):
         self.start()
 
         self.liveData = RandomTestData()
-        self.liveData = LiveData(local=True)
         self.liveData = LiveData()
+        self.liveData = LiveData(local=True)
 
     def run(self):
         while (True):
@@ -282,7 +282,7 @@ def main():
     print("[[[[[[[[[ Screen size: {} ]]]]]]]]]".format(screen.get_size()))
     # my device screen size is 800 x 480
     SCREEN_W = 798
-    SCREEN_H = 240  # half height
+    SCREEN_H = 478
     pygame.mouse.set_visible(False)
 
     # Create The Background
