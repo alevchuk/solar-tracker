@@ -22,9 +22,11 @@ try:
 except OSError:
     pass
 
-SCAN_NUM_MOVES = 100 # must match what's in the tracker (do.py)
+TARGET_FRAME_RATE = 2  # frames per second
 
-DATA_FETCH_PERIOD_MS = 100  # milliseconds
+SCAN_NUM_MOVES = 100 # drives screen width
+
+DATA_FETCH_MIN_PERIOD_MS = 100  # milliseconds, reduce CPU use on tracker brains
 
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
@@ -225,32 +227,33 @@ DATA_Q = queue.Queue(maxsize=5)
 
 class DataFetcherThread(threading.Thread):
     def __init__(self):
-        threading.Thread.__init__(self)
-        self.daemon = True
-        self.start()
-
+        self.start_s = time.time()
         self.liveData = RandomTestData()
         self.liveData = LiveData()
         self.liveData = LiveData(local=True)
 
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.start()
+
     def run(self):
         while (True):
-            start_s = time.time()
-            print("{} <--- Current queue size".format(DATA_Q.qsize()))
-
             try:
                 trackerData = self.liveData.next()
+            except AttributeError as e:
+                raise
             except Exception as e:
                 trackerData = {}
                 trackerData["exception"] = e
 
             DATA_Q.put(trackerData)
 
-            run_duration_s = time.time() - start_s
-            sleep_for_s = DATA_FETCH_PERIOD_MS / 1000 - run_duration_s
-
-            print("Sleeping for {} seconds".format(sleep_for_s))
+            run_duration_s = time.time() - self.start_s
+            #print("---> Fetch duration {:.3f} / queue size {}".format(run_duration_s, DATA_Q.qsize()))
+            sleep_for_s = DATA_FETCH_MIN_PERIOD_MS / 1000 - run_duration_s
+            self.start_s = time.time()
             if sleep_for_s > 0:
+                print("Sleeping for {}s to reduce CPU usage on tracker-brains".format(sleep_for_s))
                 time.sleep(sleep_for_s)
 
 
@@ -309,36 +312,39 @@ def main():
     # Display The Background
     screen.blit(background, (0, 0))
 
-    clock = pygame.time.Clock()
-
     levelChart = LevelChart(FG_H)
 
     frame_num = 0
-    video_start = time.time()
+    video_mon_start = time.time()
 
     first_scan_ext = True
     first_hill_climb = True
+
+    frame_start = time.time()
 
     # Main Loop
     done = False
     mode = None
 
+    clock = pygame.time.Clock()
+
     while not done:
-        clock.tick(40)
-        pygame.time.wait(100)
+        clock.tick(10)  # max is 10 frames per second
 
         level = 0
         pos = 0
         watts = None
 
         trackerData = DATA_Q.get()
-        print(trackerData)
+        #print(trackerData)
+        render_start = time.time()
 
         if "exception" in trackerData:
             # erase previous error
             errSurf.fill(BG_COLOR)
 
             # draw a footer indicating an error
+            #print(trackerData["exception"])
             error_color = ERROR_COLOR_MAP[type(trackerData["exception"])]
             footer_height = 50
             footer = pygame.Rect(0, errSurf.get_height() - footer_height, errSurf.get_width(), footer_height)
@@ -521,15 +527,26 @@ def main():
 
         pygame.display.flip()
 
-        if frame_num % 100 == 0:
-            video_duration = time.time() - video_start
-            fps = frame_num / video_duration
-            print("FPS: %.3f (video duration: %.3fs)" % (fps, video_duration))
+        MON_WINDOW_NUM_FRAMES = 10
+        if frame_num % MON_WINDOW_NUM_FRAMES == 0:
+            video_duration = time.time() - video_mon_start
+            fps = MON_WINDOW_NUM_FRAMES / video_duration
+            print("\n\n===\nFPS: %.3f (video duration: %.3fs)\n===\n" % (fps, video_duration))
+            video_mon_start = time.time()
 
         # Save every frame
         frame_num += 1
         filename = VIDEO_FRAMES_DIR + ("/%06d.png" % (frame_num))
         pygame.image.save(screen, filename)
+
+
+        #print("Render time: {:.3f}s\n\n".format(time.time() - render_start))
+
+        ## Wait the rest of allotted time
+        frame_duration = time.time() - frame_start
+        delay = (1 / TARGET_FRAME_RATE) - frame_duration
+        pygame.time.delay(int(delay * 1000))  # target 2 frames per second
+        frame_start = time.time()
 
 
     pygame.quit()
