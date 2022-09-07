@@ -139,7 +139,7 @@ class MetricsListenerThread(threading.Thread):
 
 if __name__ == "__main__":
     SCAN_SECONDS = 15
-    HILL_CLIMB_SECONDS = 60
+    HILL_CLIMB_SECONDS = 160
     METRICS.setMode(MODE_SCAN_EXT)  # start with a scan
 
     remainder1_s = SCAN_SECONDS

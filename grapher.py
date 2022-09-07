@@ -41,6 +41,7 @@ TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 LEVELS_RAW = ["#9055A2", "#D499B9", "#E8C1C5"]
 LEVELS = [pygame.Color(x) for x in LEVELS_RAW]
 HILL_CLIMB_LEVELS_RAW = ["#6F7C12", "#8CFF98", "#AAD922"]
+HILL_CLIMB_LEVELS_RAW = ["#0000BB"]
 HILL_CLIMB_LEVELS = [pygame.Color(x) for x in HILL_CLIMB_LEVELS_RAW]
 
 NUM_LEVELS = 1
@@ -78,15 +79,15 @@ class ColorShift(object):
         self.base_color = [int(t, 16) for t in triplet]
         self.offset_current = 0
         self.offset_min = 0
-        self.offset_max = 100
+        self.offset_max = 70
 
     def next(self):
         if self.offset_current < self.offset_max:
-            self.offset_current += 1
+            self.offset_current += 0.3
         else:
             self.offset_current = 0
 
-        hex_triplet = [hex(_color_add(c, self.offset_current))[2:].zfill(2) for c in self.base_color]
+        hex_triplet = [hex(_color_add(c, int(self.offset_current)))[2:].zfill(2) for c in self.base_color]
         return pygame.Color("#{}{}{}".format(*hex_triplet))
 
 
@@ -215,11 +216,8 @@ def draw_bar(pos, level, bar_height, bar_width, bar_color, chart):
     ## shift
     #chart.blit(chart, (-bar_width, 0))
 
-def draw_dot(x, y, bar_width, dot_color, surf, radius):
-    # put the bar on the chart
-    bar = pygame.Rect(x, y, bar_width, surf.get_height())
-    center = (x, y)
-    pygame.draw.circle(surf, dot_color, center, radius)
+def draw_dot(x, y, dot_color, surf, radius):
+    pygame.draw.circle(surf, dot_color, (x, y), radius)
 
 
 
@@ -302,7 +300,7 @@ def main():
     errSurf.fill(BG_COLOR)
 
     # Zoom Surface
-    ZOOM_H = SCREEN_H - FG_H - 2  # take the rest of vertical space
+    ZOOM_H = SCREEN_H - FG_H - 10  # take the rest of vertical space
     ZOOM_W = SCREEN_W * 0.6
     zoomSurf = pygame.Surface((ZOOM_W, ZOOM_H))
     zoomSurf = errSurf.convert()  # ??
@@ -427,13 +425,13 @@ def main():
 
                 # main chart: historical dot
                 hist_dot_color = histDotColorShift.next()
-                draw_dot(dot_x, dot_y, bar_width, hist_dot_color, surf=bar_dot_chart, radius=7)
+                draw_dot(dot_x, dot_y, hist_dot_color, surf=bar_dot_chart, radius=15)
 
                 # main chart
                 fgSurf.blit(bar_dot_chart, (0, 0))
 
                 # latest dot
-                draw_dot(dot_x, dot_y, bar_width, HILL_CLIMB_DOT, surf=fgSurf, radius=12)
+                draw_dot(dot_x, dot_y, HILL_CLIMB_DOT, surf=fgSurf, radius=10)
                 border_w = ZOOM_W / ZOOM_LEVEL
                 border_h = ZOOM_H / ZOOM_LEVEL
                 border_left = dot_x - border_w / 2
@@ -450,8 +448,8 @@ def main():
                 offset = (x_offset, y_offset)
 
                 # zoom chart: historical dot
-                draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, bar_width * ZOOM_LEVEL, hist_dot_color,
-                    surf=zoomedUncroppedSurf, radius=5)
+                draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, hist_dot_color,
+                    surf=zoomedUncroppedSurf, radius=15)
 
                 zoomSurf.fill(BG_COLOR)
                 zoomSurf.blit(zoomedUncroppedSurf, offset, (0, 0, 0 - x_offset + ZOOM_W, 0 - y_offset + ZOOM_H))
@@ -465,7 +463,7 @@ def main():
                 background.blit(zoomSurf, (0, 0), (0, 0, ZOOM_W, ZOOM_H))
 
                 # since we're zoomed and panned, just draw this in the middle
-                draw_dot(ZOOM_W / 2, ZOOM_H / 2, bar_width, HILL_CLIMB_DOT, surf=background, radius=8)
+                draw_dot(ZOOM_W / 2, ZOOM_H / 2, HILL_CLIMB_DOT, surf=background, radius=10)
 
                 first_hill_climb = False
             else:
