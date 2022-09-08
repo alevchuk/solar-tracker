@@ -316,6 +316,7 @@ def main():
 
     frame_num = 0
     video_mon_start = time.time()
+    video_start = video_mon_start
 
     first_scan_ext = True
     first_hill_climb = True
@@ -527,8 +528,8 @@ def main():
 
         pygame.display.flip()
 
-        MON_WINDOW_NUM_FRAMES = 10
-        if frame_num % MON_WINDOW_NUM_FRAMES == 0:
+        MON_WINDOW_NUM_FRAMES = 100
+        if frame_num % MON_WINDOW_NUM_FRAMES == 0 and time.time() - video_start > 10:
             video_duration = time.time() - video_mon_start
             fps = MON_WINDOW_NUM_FRAMES / video_duration
             print("\n\n===\nFPS: %.3f (video duration: %.3fs)\n===\n" % (fps, video_duration))
