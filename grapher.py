@@ -528,7 +528,7 @@ def main():
 
         pygame.display.flip()
 
-        MON_WINDOW_NUM_FRAMES = 10
+        MON_WINDOW_NUM_FRAMES = 100
                 
         if frame_num % MON_WINDOW_NUM_FRAMES == 0:
             if video_mon_start is not None:
