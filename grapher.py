@@ -315,8 +315,8 @@ def main():
     levelChart = LevelChart(FG_H)
 
     frame_num = 0
-    video_mon_start = time.time()
-    video_start = video_mon_start
+    video_mon_start = None
+    video_start = time.time()
 
     first_scan_ext = True
     first_hill_climb = True
@@ -528,11 +528,23 @@ def main():
 
         pygame.display.flip()
 
-        MON_WINDOW_NUM_FRAMES = 100
-        if frame_num % MON_WINDOW_NUM_FRAMES == 0 and time.time() - video_start > 10:
-            video_duration = time.time() - video_mon_start
-            fps = MON_WINDOW_NUM_FRAMES / video_duration
-            print("\n\n===\nFPS: %.3f (video duration: %.3fs)\n===\n" % (fps, video_duration))
+        MON_WINDOW_NUM_FRAMES = 10
+                
+        if frame_num % MON_WINDOW_NUM_FRAMES == 0:
+            if video_mon_start is not None:
+                mon_duration = time.time() - video_mon_start
+                fps = MON_WINDOW_NUM_FRAMES / mon_duration
+                print("\n\n===\nFPS: %.3f (video duration: %.3fs)" % (fps, mon_duration))
+
+                # correcting if we undershot. undershooting happens more often then overshooting.
+                expected_duration = MON_WINDOW_NUM_FRAMES / TARGET_FRAME_RATE
+                if mon_duration < expected_duration:
+                    correction_delay = expected_duration - mon_duration
+                    print("Correcting by {:.3f} seconds".format(correction_delay))
+                    pygame.time.delay(int(correction_delay * 1000))
+
+                print("===\n")
+
             video_mon_start = time.time()
 
         # Save every frame
@@ -546,7 +558,8 @@ def main():
         ## Wait the rest of allotted time
         frame_duration = time.time() - frame_start
         delay = (1 / TARGET_FRAME_RATE) - frame_duration
-        pygame.time.delay(int(delay * 1000))  # target 2 frames per second
+        if delay > 0:
+            pygame.time.delay(int(delay * 1000))  # target 2 frames per second
         frame_start = time.time()
 
 
