@@ -31,7 +31,6 @@ DATA_FETCH_MIN_PERIOD_MS = 100  # milliseconds, reduce CPU use on tracker brains
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
-MODE_SCAN_RESET = "scan-reset"
 MODE_SCAN_EXT = "scan-ext"
 MODE_SCAN_RET = "scan-ret"
 
@@ -416,10 +415,6 @@ def main():
                     draw_bar(pos, level, bar_height, bar_width, bar_color, i)
             else:
                 first_scan_ext = True
-
-            if mode == MODE_SCAN_RET:
-                for i in [bar_chart, bar_dot_chart]:
-                    draw_bar(pos, level, bar_height, bar_width, bar_color, i)
 
             if mode.startswith(MODE_HILL_CLIMB):
                 # zoom chart
