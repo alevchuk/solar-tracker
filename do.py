@@ -71,11 +71,19 @@ class Metrics(object):
         self.efficiency_pct = None
         self.wobble_data = None
 
+        # is_probe and is_decision only applies to hill climb
+        self.is_probe = None
+        self.is_decision = None
+
     def setMode(self, mode):
         self.mode = mode
 
-    def setValue(self, value):
+    def setValue(self, value, is_probe=None, is_decision=None):
         assert value is not None
+        if is_probe is not None:
+            self.is_probe = is_probe
+        if is_decision is not None:
+            self.is_decision = is_decision
         self.value = value
         self.last_updated = time.time()
 
@@ -101,7 +109,9 @@ class Metrics(object):
             'age': age,
             'mode': self.mode,
             'pos': self.pos,
-            'wobble_data': self.wobble_data
+            'wobble_data': self.wobble_data,
+            'is_probe': self.is_probe,
+            'is_decision': self.is_decision,
         }
 
         if self.efficiency_pct is not None:
@@ -203,7 +213,14 @@ class WattsFetcherThread(threading.Thread):
 
         self.last_sensor_read = None
 
-    def read(self, state, hide_metrics=False):
+    def read(self, state, hide_metrics=False, is_decision=None):
+        if is_decision is not None:
+            is_probe = not is_decision
+        else:
+            # None means don't change
+            is_probe = None
+            is_decision = None
+
         if self.last_sensor_read is None:
             return None
         else:
@@ -212,7 +229,7 @@ class WattsFetcherThread(threading.Thread):
             measured_power = last['value']
 
             if not hide_metrics:
-                METRICS.setValue(measured_power / 1000)
+                METRICS.setValue(measured_power / 1000, is_probe=is_probe, is_decision=is_decision)
                 METRICS.setPos(state.pos)
 
             if age > MEASURE_SLEEP:
@@ -257,28 +274,28 @@ class WattsFetcherThread(threading.Thread):
 # Run in the background
 LAST_WATTS_READ = WattsFetcherThread()
 
-def further(state):
+def further(state, is_decision=False):
     if state.attemted_direction == "ret":
         METRICS.setMode(MODE_HILL_CLIMB_RET)
         log("<== Try Ret")
-        state.armRet()
+        state.armRet(is_decision=is_decision)
     else:
         METRICS.setMode(MODE_HILL_CLIMB_EXT)
         log("==> Try Ext")
-        state.armExt()
+        state.armExt(is_decision=is_decision)
 
-def undo(state):
+def undo(state, is_decision=False):
     if state.attemted_direction == "ret":
         METRICS.setMode(MODE_HILL_CLIMB_EXT)
         log("U<= Undo Ret")
-        state.armExt()
+        state.armExt(is_decision=is_decision)
     else:
         METRICS.setMode(MODE_HILL_CLIMB_RET)
         log("=>U Undo Ext")
-        state.armRet()
+        state.armRet(is_decision=is_decision)
 
 def hill_climb(state):
-    log(state.descision_history)
+    log(state.decision_history)
 
     power_before = None
     while (power_before is None):
@@ -297,7 +314,7 @@ def hill_climb(state):
     state.updateEfficiency(power_after)
     METRICS.setMode(MODE_HILL_CLIMB)
 
-    descision = state.attemted_direction
+    decision = state.attemted_direction
     if power_after - power_before > 0:
         log("We have improvement of +%.3f mW !" % (power_after - power_before))
         # we still need to test for ani-imporvment to avoid getting tricked by clouds
@@ -312,12 +329,12 @@ def hill_climb(state):
 
         if power_before - power_on_the_filp_side < (power_after - power_before) * 0.9:
             log("Anti-improvement of %.3f mW is not sufficient! Maybe a cloud?" % (power_before - power_on_the_filp_side))
-            further(state)
-            descision = "stay"
+            further(state, is_decision=True)
+            decision = "stay"
         else:
             # Advance in favorable direction
             further(state)
-            further(state)
+            further(state, is_decision=True)
     else:
         # before reversing we still need to test for ani-imporvment to avoid getting tricked by clouds
         undo(state)
@@ -335,8 +352,8 @@ def hill_climb(state):
 
         if power_after - power_before < 0:
             log("Reversing also does not make sense. Maybe a cloud?")
-            further(state)
-            descision = "stay"
+            further(state, is_decision=True)
+            decision = "stay"
         else:
             log("We have improvement of +%.3f mW when revrsing !" % (power_after - power_before))
             # we still need to test for ani-imporvment to avoid getting tricked by clouds
@@ -354,14 +371,14 @@ def hill_climb(state):
                     state.attemted_direction = "ret"
             else:
                 log("Anti-improvement of +%.3f mW is not sufficient! Maybe a cloud?" % (power_on_the_filp_side - power_before))
-                further(state)
-                descision = "stay"
+                further(state, is_decision=True)
+                decision = "stay"
 
     METRICS.setMode(MODE_HILL_CLIMB)
 
-    state.descision_history.append(descision)
-    if len(state.descision_history) > OPTIMA_SAMPLES:
-        state.descision_history = state.descision_history[-OPTIMA_SAMPLES:]
+    state.decision_history.append(decision)
+    if len(state.decision_history) > OPTIMA_SAMPLES:
+        state.decision_history = state.decision_history[-OPTIMA_SAMPLES:]
 
 
 def remove_outliers(measurements):
@@ -509,7 +526,7 @@ def pretty_print_deg(angle_degrees):
 class TrackerState(object):
     def __init__(self):
         self.step_deg = 0.5
-        self.descision_history = []
+        self.decision_history = []
         self.attemted_direction = "ext"
         self.pos = 0
         self.start_of_scan = None
@@ -561,7 +578,7 @@ class TrackerState(object):
         else:
             return EXT_CHANNEL
 
-    def _arm(self, distance_deg, direction, exact):
+    def _arm(self, distance_deg, direction, exact, is_decision=False):
         if distance_deg is None:
             distance_deg = self.step_deg
 
@@ -590,7 +607,7 @@ class TrackerState(object):
             self.updateWobbleData(dur, useful_time=delay)
 
             # 4. take a watts reading for the grapher
-            LAST_WATTS_READ.read(state)
+            LAST_WATTS_READ.read(state, is_decision=is_decision)
 
             # 5. write angle data to a file
             with open(HOME + "/drag.tab", "a") as fout:
@@ -618,11 +635,11 @@ class TrackerState(object):
                     error_deg = -error_deg
                 self._arm(error_deg, direction, exact)
 
-    def armRet(self, deg=None, exact=True):
-        self._arm(deg, RET_CHANNEL, exact)
+    def armRet(self, deg=None, exact=True, is_decision=False):
+        self._arm(deg, RET_CHANNEL, exact, is_decision=is_decision)
 
-    def armExt(self, deg=None, exact=True):
-        self._arm(deg, EXT_CHANNEL, exact)
+    def armExt(self, deg=None, exact=True, is_decision=False):
+        self._arm(deg, EXT_CHANNEL, exact, is_decision=is_decision)
 
     def toLowerExtreme(self, state):
         state.armRet(REWIND_DEG, exact=False)

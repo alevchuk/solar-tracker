@@ -335,7 +335,7 @@ def main():
         watts = None
 
         trackerData = DATA_Q.get()
-        #print(trackerData)
+        # print({'is_decision': trackerData['is_decision'], 'is_probe': trackerData['is_probe']})
         render_start = time.time()
 
         if "exception" in trackerData:
