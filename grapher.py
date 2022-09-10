@@ -42,18 +42,18 @@ TEXT_OUTLINE_COLOR = pygame.Color("#FF0000")
 LEVELS_RAW = ["#9055A2", "#D499B9", "#E8C1C5"]
 LEVELS = [pygame.Color(x) for x in LEVELS_RAW]
 HILL_CLIMB_LEVELS_RAW = ["#6F7C12", "#8CFF98", "#AAD922"]
-HILL_CLIMB_LEVELS_RAW = ["#0000BB"]
+HILL_CLIMB_LEVELS_RAW = ["#0000BB"]  # blue
 HILL_CLIMB_LEVELS = [pygame.Color(x) for x in HILL_CLIMB_LEVELS_RAW]
 
 NUM_LEVELS = 1
 LEVELS = LEVELS[0:NUM_LEVELS]
 HILL_CLIMB_LEVELS = HILL_CLIMB_LEVELS[0:NUM_LEVELS]
 
-DOT_COLOR = pygame.Color("#385000")
+LATEST_DOT_COLOR = pygame.Color("#57F50A")  # green
+PROBE_DOT_COLOR = pygame.Color("#222222")  # gray
 
 POS_DEG_TO_GRAPH_RATIO = 1.5
 
-HILL_CLIMB_DOT = pygame.Color("#57F50A")
 
 if not pygame.font:
     print("Warning, fonts disabled")
@@ -90,6 +90,9 @@ class ColorShift(object):
 
         hex_triplet = [hex(_color_add(c, int(self.offset_current)))[2:].zfill(2) for c in self.base_color]
         return pygame.Color("#{}{}{}".format(*hex_triplet))
+
+    def reset(self):
+        self.offset_current = 0
 
 
 # TODO: after removing LEVELS, add this only to historical dots (in main and zoom)
@@ -228,8 +231,8 @@ class DataFetcherThread(threading.Thread):
     def __init__(self):
         self.start_s = time.time()
         self.liveData = RandomTestData()
-        self.liveData = LiveData()
         self.liveData = LiveData(local=True)
+        self.liveData = LiveData()
 
         threading.Thread.__init__(self)
         self.daemon = True
@@ -278,34 +281,28 @@ def main():
     pygame.mouse.set_visible(False)
 
     # Create The Background
-    background = pygame.Surface((SCREEN_W, SCREEN_H))
-    background = background.convert()
+    background = pygame.Surface((SCREEN_W, SCREEN_H)).convert()
 
     # Foreground Surface
     FG_W = SCREEN_W - 3
     FG_H = SCREEN_H * 0.6 - 1  # foreground takes bottom % of vertical space
-    fgSurf = pygame.Surface((FG_W, FG_H))
-    fgSurf = fgSurf.convert()
+    fgSurf = pygame.Surface((FG_W, FG_H)).convert()
     fgSurf.fill(BG_COLOR)
 
     # Surface 1 (bars only)
-    bar_chart = pygame.Surface(fgSurf.get_size())
-    bar_chart = bar_chart.convert()
+    bar_chart = pygame.Surface(fgSurf.get_size()).convert()
 
-    # Surface 2 (bars and dots)
-    bar_dot_chart = pygame.Surface(fgSurf.get_size())
-    bar_dot_chart = bar_dot_chart.convert()
+    # Surface 2 (bars and probes)
+    bar_probe_chart = pygame.Surface(fgSurf.get_size()).convert()
 
-    # Surface 3 (print errors)
-    errSurf = pygame.Surface((SCREEN_W, SCREEN_H))
-    errSurf = errSurf.convert()
+    # Surface 4 (print errors)
+    errSurf = pygame.Surface((SCREEN_W, SCREEN_H)).convert()
     errSurf.fill(BG_COLOR)
 
     # Zoom Surface
     ZOOM_H = SCREEN_H - FG_H - 10  # take the rest of vertical space
     ZOOM_W = SCREEN_W * 0.6
-    zoomSurf = pygame.Surface((ZOOM_W, ZOOM_H))
-    zoomSurf = errSurf.convert()  # ??
+    zoomSurf = pygame.Surface((ZOOM_W, ZOOM_H)).convert()
     zoomSurf.fill(BG_COLOR)
 
     # Display The Background
@@ -321,6 +318,8 @@ def main():
     first_hill_climb = True
 
     frame_start = time.time()
+
+    decision_dots = []
 
     # Main Loop
     done = False
@@ -391,6 +390,8 @@ def main():
             watts = trackerData["value"]
             mode = trackerData["mode"]
             pos = trackerData["pos"] * POS_DEG_TO_GRAPH_RATIO
+            is_probe = trackerData["is_probe"]
+            is_decision = trackerData["is_decision"]
             efficiency_pct = trackerData.get("efficiency_pct")
             wobble_data = trackerData.get("wobble_data")
 
@@ -407,11 +408,12 @@ def main():
             if mode == MODE_SCAN_EXT:
                 if first_scan_ext:
                     print("Erasing dot chart!")
-                    bar_dot_chart.blit(bar_chart, (0, 0))
+                    decision_dots = []
+                    bar_probe_chart.blit(bar_chart, (0, 0))
                     first_scan_ext = False
 
                 # draw bars on both surfaces
-                for i in [bar_chart, bar_dot_chart]:
+                for i in [bar_chart, bar_probe_chart]:
                     draw_bar(pos, level, bar_height, bar_width, bar_color, i)
             else:
                 first_scan_ext = True
@@ -425,15 +427,24 @@ def main():
                 dot_x = pos * bar_width
                 dot_y = FG_H - bar_height
 
-                # main chart: historical dot
-                hist_dot_color = histDotColorShift.next()
-                draw_dot(dot_x, dot_y, hist_dot_color, surf=bar_dot_chart, radius=15)
+                # historical dot (main)
+                if is_probe:
+                    draw_dot(dot_x, dot_y, PROBE_DOT_COLOR, surf=bar_probe_chart, radius=15)
+                else:
+                    dot = (dot_x, dot_y)
+                    decision_dots.append(dot)
 
                 # main chart
-                fgSurf.blit(bar_dot_chart, (0, 0))
+                fgSurf.blit(bar_probe_chart, (0, 0))
+
+                # draw decision path (main)
+                histDotColorShift.reset()
+                for dot in decision_dots:
+                    color = histDotColorShift.next()
+                    draw_dot(*dot, color, surf=fgSurf, radius=10)
 
                 # latest dot
-                draw_dot(dot_x, dot_y, HILL_CLIMB_DOT, surf=fgSurf, radius=10)
+                draw_dot(dot_x, dot_y, LATEST_DOT_COLOR, surf=fgSurf, radius=10)
                 border_w = ZOOM_W / ZOOM_LEVEL
                 border_h = ZOOM_H / ZOOM_LEVEL
                 border_left = dot_x - border_w / 2
@@ -449,9 +460,16 @@ def main():
                 y_offset = (0.5 * ZOOM_H) - (dot_y * ZOOM_LEVEL)
                 offset = (x_offset, y_offset)
 
-                # zoom chart: historical dot
-                draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, hist_dot_color,
-                    surf=zoomedUncroppedSurf, radius=15)
+                # historical dot (zoom)
+                if is_probe:
+                    draw_dot(dot_x * ZOOM_LEVEL, dot_y * ZOOM_LEVEL, PROBE_DOT_COLOR,
+                        surf=zoomedUncroppedSurf, radius=15)
+
+                # draw decision path (main)
+                histDotColorShift.reset()
+                for dot in decision_dots:
+                    color = histDotColorShift.next()
+                    draw_dot(dot[0] * ZOOM_LEVEL, dot[1] * ZOOM_LEVEL, color, surf=zoomedUncroppedSurf, radius=10)
 
                 zoomSurf.fill(BG_COLOR)
                 zoomSurf.blit(zoomedUncroppedSurf, offset, (0, 0, 0 - x_offset + ZOOM_W, 0 - y_offset + ZOOM_H))
@@ -465,11 +483,11 @@ def main():
                 background.blit(zoomSurf, (0, 0), (0, 0, ZOOM_W, ZOOM_H))
 
                 # since we're zoomed and panned, just draw this in the middle
-                draw_dot(ZOOM_W / 2, ZOOM_H / 2, HILL_CLIMB_DOT, surf=background, radius=10)
+                draw_dot(ZOOM_W / 2, ZOOM_H / 2, LATEST_DOT_COLOR, surf=background, radius=10)
 
                 first_hill_climb = False
             else:
-                fgSurf.blit(bar_dot_chart, (0, 0))
+                fgSurf.blit(bar_probe_chart, (0, 0))
                 first_hill_climb = True
 
             # foreground chart: border

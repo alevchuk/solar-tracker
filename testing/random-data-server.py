@@ -14,6 +14,7 @@ START_TIME = time.time()
 MODE_HILL_CLIMB = "hill-climb"
 MODE_HILL_CLIMB_RET = "hill-climb-ret"
 MODE_HILL_CLIMB_EXT = "hill-climb-ext"
+MODE_SCAN = "scan"
 MODE_SCAN_RESET = "scan-reset"
 MODE_SCAN_EXT = "scan-ext"
 MODE_SCAN_RET = "scan-ret"
@@ -32,12 +33,12 @@ class RandomTestData(object):
         delta = random.random() - 0.5
 
         if METRICS.mode.startswith(MODE_HILL_CLIMB):
-            delta /= 50
+            delta /= 10
 
         if (self.direction == "up" and delta > 0) or (self.direction == "down" and delta < 0):
             delta *= 2
 
-        new_value = self.prev_value + delta * 5
+        new_value = self.prev_value + delta * 30
         if new_value < 0:
             new_value = 0
             self.direction = "up"
@@ -62,28 +63,69 @@ class Metrics(object):
         self.pos = SCAN_DEG_START
         self.pos_direction = 'ext'
         self.mode = MODE_SCAN_EXT
+        self.step_count = 0
+
+        # is_probe and is_decision only applies to hill climb
+        self.is_probe = False
+        self.is_decision = False
 
     def setMode(self, value):
         self.mode = value
 
     def updatePos(self):
-        step_size = 0.1
+        self.step_count += 1
+        step_size = 0.5
 
         if self.mode.startswith(MODE_HILL_CLIMB):
-            step_size /= 100
-            if random.random() > 0.5:
-                self.pos_direction = 'ret'
-            else:
-                self.pos_direction = 'ext'
+            step_size /= 2
+            self.is_probe = True
+            self.is_decision = False
 
+            # proble left
+            if self.step_count % 5 == 0:
+                self.pos -= step_size
+                return
+
+            # go back to center
+            if self.step_count % 5 == 1:
+                self.pos += step_size
+                return
+
+            # proble right
+            if self.step_count % 5 == 2:
+                self.pos += step_size
+                return
+
+            # go back to center
+            if self.step_count % 5 == 3:
+                self.pos -= step_size
+                return
+
+            # make a decision
+            if self.step_count % 5 == 4:
+                if random.random() > 0.5:
+                    self.pos_direction = 'ret'
+                else:
+                    self.pos_direction = 'ext'
+
+            self.is_decision = True
+            self.is_probe = False
+
+        if self.mode.startswith(MODE_SCAN):
+            # is_probe and is_decision only applies to hill climb
+            self.is_probe = False
+            self.is_decision = False
+
+        # continue moving in the direction of pos_direction
+        # the following code is reused for scans and hill climb
         if self.pos_direction == 'ext':
             if self.pos < SCAN_DEG_END:
-                self.pos += 0.1
+                self.pos += step_size
             else:
                 self.pos_direction = 'ret'
         else:
             if self.pos > SCAN_DEG_START:
-                self.pos -= 0.1
+                self.pos -= step_size
             else:
                 self.pos_direction = 'ext'
 
@@ -95,6 +137,7 @@ class Metrics(object):
         age = None
         if self.last_updated:
             age = time.time() - self.last_updated
+        assert self.is_probe is False or self.is_decision is False, "is_probe and is_decision can't both be True"
         return {
             'value': self.value,
             'age': age,
@@ -102,6 +145,8 @@ class Metrics(object):
             'pos': self.pos,
             'efficiency_pct': 199,
             'wobble_data': [12, 34, 56],
+            'is_probe': self.is_probe,
+            'is_decision': self.is_decision,
         }
 
 METRICS = Metrics()
@@ -139,7 +184,7 @@ class MetricsListenerThread(threading.Thread):
 
 if __name__ == "__main__":
     SCAN_SECONDS = 15
-    HILL_CLIMB_SECONDS = 160
+    HILL_CLIMB_SECONDS = 300
     METRICS.setMode(MODE_SCAN_EXT)  # start with a scan
 
     remainder1_s = SCAN_SECONDS
@@ -167,4 +212,4 @@ if __name__ == "__main__":
 
         METRICS.updatePos()
         METRICS.setValue(generator.next())
-        time.sleep(0.1)
+        time.sleep(1)
