@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -u
+set -e
+set -o
+
+label=$1
+
+time ffmpeg -y -f image2 -i %06d.png   -vcodec libx264 ~/result-video-frames-$label.avi
+time ffmpeg -y -i ~/result-video-frames-$label.avi -map 0:v -c:v copy -bsf:v h264_mp4toannexb ~/result-video-frames-$label.raw.h264
+
+r=1256.5 \
+time ffmpeg -y -fflags +genpts -r $r -i  ~/result-video-frames-$label.raw.h264 -c:v copy ~/result-video-frames-$label.raw.h264.spedup.mp4
+
+
+## bad attemnt: Unknown bitstream filter h265_mp4toannexb
+#time ffmpeg  -f image2 -i %06d.png   -vcodec libx265 -crf 30 -y ~/result-video-frames-$label.avi
+#time ffmpeg  -i ~/result-video-frames-$label.avi -map 0:v -c:v copy -bsf:v h265_mp4toannexb ~/result-video-frames-$label.raw.h264
+#r=1256.5; time ffmpeg -fflags +genpts -r $r -i  ~/result-video-frames-$label.raw.h265 -c:v copy ~/result-video-frames-$label.raw.h265.spedup.mp4 -y
+
+## compress
+time ffmpeg -y -i ~/result-video-frames-$label.raw.h264.spedup.mp4 -vcodec libx265 -crf 28 ~/result-video-frames-$label.mp4
+#### compress does not work - shows white screen, when ends wit .avi?
+##ffmpeg -i result-video-frames-2022-09-05-hot-day.raw.h264.spedup.mp4 -vcodec libx265 -crf 28  result-video-frames-2022-09-05-hot-day.raw.h264.spedup.mp4-compressed.mp4
+
+# delete temporary files
+rm ~/result-video-frames-$label.avi
+rm ~/result-video-frames-$label.raw.h264
+rm ~/result-video-frames-$label.raw.h264.spedup.mp4
