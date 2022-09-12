@@ -15,13 +15,13 @@ cat ~/measurements.txt | tr '\t' ',' >> ~/measurements.csv
 == (rare) Every time you get a fresh linux install ==
 ```
 sudo apt-get install python3-tk
-sudo apt-get install python3-virtualenv
+sudo apt install python3.10-venv
 ```
 
 == (rare) Every time you clone github repo ==
 ```
 cd solar-tracker
-virtualenv -p python3 analysis/
+python3 -m venv analysis
 cd analysis/
 . ./bin/activate
 pip install pandas matplotlib
