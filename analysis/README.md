@@ -24,5 +24,5 @@ cd solar-tracker
 python3 -m venv analysis
 cd analysis/
 . ./bin/activate
-pip install pandas matplotlib
+pip install pandas matplotlib sklearn
 ```
