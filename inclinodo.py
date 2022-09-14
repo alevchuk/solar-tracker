@@ -198,7 +198,7 @@ def has_wobble(angles):
 class MeasurementsRecorder(object):
     def __init__(self, is_ext):
         self.count = 0
-        self.gen = int(random.random() * 10000)
+        self.gen = int(random.random() * 10000000)
         self.ext = is_ext
         self.measurements = []
         self.angles = []
