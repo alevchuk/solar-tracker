@@ -10,11 +10,9 @@ matplotlib.use('TkAgg')
 
 series = read_csv('~/measurements-2022-09-14-windy-day.csv', header=0, index_col=4)
 
-ext = True
-gen = 1306
+gen = 20
 
 series = series[series["gen"] == gen]
-series = series[series["ext"] == ext]
 series["ts_offset"] = series["ts"] - float(series.head(1)["ts"])
 plot1 = series.plot(x="ts_offset", y="angle", fontsize=20)
 plot1.set_title("Angle change over time", fontsize=20)
