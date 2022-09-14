@@ -19,6 +19,17 @@ import RPi.GPIO as GPIO
 import time
 import random
 
+# shunt imports
+from ina219 import INA219
+from ina219 import DeviceRangeError
+
+# Set the constants that were calculated
+SHUNT_MV = 75
+MAX_EXPECTED_AMPS = 100
+SHUNT_OHMS = (SHUNT_MV / 1000) / MAX_EXPECTED_AMPS  # R = V / i
+
+MEASURE_SLEEP = 0.01
+
 SENSOR_PORT = 2017
 MEASUREMENTS_FILE = "/home/pi/measurements.txt"
 
@@ -62,6 +73,68 @@ def ret(duration_s):
     motor_off(ret_channel)
 
 logging.getLogger("imported_module").setLevel(logging.WARNING)
+
+LAST_WATTS_READ = None
+
+class WattsFetcherThread(threading.Thread):
+    def __init__(self):
+        self.last_sensor_read = None
+
+        # Instantiate the ina object with the above constants
+        self.ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS, address=0x40)
+        # Configure the object with the expected bus voltage
+        # (either up to 16V or up to 32V with .RANGE_32V)
+        # Also, configure the gain to be GAIN_2_80MW for the above example
+        self.ina.configure(voltage_range=INA219.RANGE_32V)
+
+        #if not ina.is_conversion_ready():
+        #    log("INA Conversion not ready, sleeping for 100ms")
+        #    time.sleep(0.1)
+        #    continue
+
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.start()
+
+
+
+    def read(self):
+        if self.last_sensor_read is None:
+            return None
+        else:
+            last = self.last_sensor_read.copy()
+            age = time.time() - last['read_at']
+            measured_power = last['value']
+
+            if age > MEASURE_SLEEP:
+                return None
+
+            return {"milliwatts": measured_power, "ts": last['read_at']}
+
+    def _read(self):
+        while True:
+            try:
+                measured_power = self.ina.power()  # Power in milliwatts
+
+                # log(ina.voltage()) ?
+
+                return measured_power
+
+            except Exception as e:
+                log("Exception when reading from INA, {}".format(e))
+
+            time.sleep(MEASURE_SLEEP)
+
+
+    def run(self):
+        while (True):
+            value = self._read()
+
+            self.last_sensor_read = {'value': value, 'read_at': time.time()}
+            time.sleep(MEASURE_SLEEP)
+
+# Run in the background
+LAST_WATTS_READ = WattsFetcherThread()
 
 
 class Metrics(object):
@@ -200,25 +273,25 @@ class MeasurementsRecorder(object):
         self.count = 0
         self.gen = int(random.random() * 10000000)
         self.ext = is_ext
-        self.measurements = []
-        self.angles = []
 
-    def do(self, ts, angle, f):
+    def do(self, ts, angle, f, shunt_data):
         self.count += 1
 
         now_ts = time.time()
-        self.measurements.append([ts, ts - now_ts, self.gen, self.ext, self.count, angle])
-        self.angles.append(angle)
+        if shunt_data is not None:
+            milliwatts = shunt_data.get("milliwatts")
+            shunt_ts = shunt_data.get("ts")
+        else:
+            milliwatts = None
+            shunt_ts = None
 
-        #if not has_wobble(self.angles):
-        for measurements_row in self.measurements:
-            f.write("\t".join([str(m) for m in measurements_row]) + "\n")
-
-        self.angles = []
-        self.measurements = []
+        measurements_row = [ts, ts - now_ts, self.gen, self.ext, self.count, angle, milliwatts, shunt_ts]
+        f.write("\t".join([str(m) for m in measurements_row]) + "\n")
 
         if self.count % 100 == 0:
             pretty_print_deg(angle)
+            if milliwatts is not None:
+                pretty_print_pow(milliwatts)
 
 
 def get_line():
@@ -269,7 +342,8 @@ if __name__ == "__main__":
 
                     if not math.isnan(angle):
                         METRICS.setValue(angle)
-                        recorder.do(ts, angle, f)
+                        shunt_data = LAST_WATTS_READ.read()
+                        recorder.do(ts, angle, f, shunt_data)
                     else:
                         log("did not get angle")
 
@@ -277,7 +351,7 @@ if __name__ == "__main__":
                 else:
                     log("Bad STO (self test output) {} for {}".format(sto, line))
 
-                time.sleep(0.01)
+                time.sleep(MEASURE_SLEEP)
 
             motor_off(arm_channel)
 
