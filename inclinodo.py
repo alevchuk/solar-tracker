@@ -5,6 +5,7 @@ import sys
 import math
 import sys
 import time
+import os
 from shutil import get_terminal_size
 
 import threading
@@ -16,9 +17,22 @@ import logging
 
 import RPi.GPIO as GPIO
 import time
+import random
 
 SENSOR_PORT = 2017
 MEASUREMENTS_FILE = "/home/pi/measurements.txt"
+
+HOME = os.path.expanduser("~")
+
+START_TIME = time.time()
+def log(text):
+    seconds_since_start = time.time() - START_TIME
+    minutes = int(seconds_since_start / 60) % 60
+    hours = int(minutes / 60)
+    seconds = seconds_since_start % 60
+
+    print("[{: >2}h {: >2}m {:0>6}s] {}".format(hours, minutes, "{:0.3f}".format(seconds), text))
+
 
 ret_channel = 20
 ext_channel = 21
@@ -122,13 +136,20 @@ class MetricsListenerThread(threading.Thread):
 # Launch listener threads for Metrics
 [MetricsListenerThread(i) for i in range(Metrics.NUM_LISTENER_THREADS)]
 
+def pretty_print_pow(measured_power):
+    label = "Power: %.3f W " % (measured_power / 1000)
+    term_width = get_terminal_size()[0] - len(label) - 1
+    ratio = (measured_power / 1000) / 100
+    if ratio > 1:
+        ratio = 1
 
-def pretty_print(angle_degrees):
-    label = "Angle (degrees): %.4f" % angle_degrees
-    print(label, end = " ")
+    log(label + ("*" * int(term_width * ratio)))
+
+def pretty_print_deg(angle_degrees):
+    label = "Angle (degrees): %.3f " % angle_degrees
     term_width = get_terminal_size()[0] - len(label) - 1
     ratio = (angle_degrees) / 180
-    print("*" * int(term_width * ratio))
+    log(label + ("*" * int(term_width * ratio)))
 
 
 # calculating simple moving average over window_size points
@@ -174,49 +195,30 @@ def has_wobble(angles):
     return False  # does not have wobble
 
 
-class StepSize(object):
-    def __init__(self):
+class MeasurementsRecorder(object):
+    def __init__(self, is_ext):
         self.count = 0
-        self.gen = 0  # gen 0 is 1s step, 1 is 1s-0.01s, 2 is 1s-0.02s, ...
-        self.ext = True  # every gen has ext + ret
+        self.gen = int(random.random() * 10000)
+        self.ext = is_ext
         self.measurements = []
         self.angles = []
 
-    def do(self, ts, angle):
+    def do(self, ts, angle, f):
         self.count += 1
 
         now_ts = time.time()
         self.measurements.append([ts, ts - now_ts, self.gen, self.ext, self.count, angle])
         self.angles.append(angle)
 
-        ##print(angle)
-        if not has_wobble(self.angles):
-            with open(MEASUREMENTS_FILE, "a") as f:
-                for measurements_row in self.measurements:
-                    f.write("\t".join([str(m) for m in measurements_row]) + "\n")
+        #if not has_wobble(self.angles):
+        for measurements_row in self.measurements:
+            f.write("\t".join([str(m) for m in measurements_row]) + "\n")
 
-            self.angles = []
-            self.measurements = []
+        self.angles = []
+        self.measurements = []
 
-            pretty_print(angle)
-            # print("Delay: {}".format(time.time() - ts))
-
-            step_size = 1 - (self.gen * 0.01)  # in seconds
-            if self.ext:
-                ext(step_size)
-                if angle > 40:
-                    self.ext = False
-            else:
-                ret(step_size)
-                if angle < 3:
-                    self.ext = True
-                    self.gen += 1
-                    print("")
-                    print("===============================")
-                    print("Generation: {}".format(self.gen))
-                    print("===============================")
-                    if self.gen == 101:
-                        sys.exit(0)
+        if self.count % 100 == 0:
+            pretty_print_deg(angle)
 
 
 def get_line():
@@ -225,42 +227,60 @@ def get_line():
         return s.recv(1024)
 
 if __name__ == "__main__":
-    ss = StepSize()
+    duration = 80
+    if len(sys.argv) > 1 and sys.argv[1] == "1":
+        is_ext = True
+    else:
+        is_ext = False
+
+    if is_ext:
+        arm_channel = ext_channel
+    else:
+        arm_channel = ret_channel
+
+    recorder = MeasurementsRecorder(is_ext)
     setup()
 
-    # drop old records
-    with open(MEASUREMENTS_FILE, "w") as f:
-        pass
+    GPIO.setup(arm_channel, GPIO.OUT)
+    motor_on(arm_channel)
+    with open(MEASUREMENTS_FILE, "a") as f:
+        try:
+            while True:
+                if time.time() - START_TIME > duration:
+                    break
 
-    try:
-        while True:
-            line = None
-            try:
-                line = get_line()    
-                ts, x, y, z, angle, crc_ok_rate, sto = line.split(b'\t')
-            except Exception as e:
-                print("ERROR: could not read data from network")
-                print(e)
-                print(repr(line))
-                sys.exit(1)
-
-            if -70 < int(sto) < 70:
-                angle = float(angle)
-                ts = float(ts)
-
-                if time.time() - ts > 0.1:
-                    print("ERROR: sensor data is too stale")
+                line = None
+                try:
+                    line = get_line()
+                    ts, x, y, z, angle, crc_ok_rate, sto = line.split(b'\t')
+                except Exception as e:
+                    log("ERROR: could not read data from network")
+                    log(repr(e))
+                    log(repr(line))
                     sys.exit(1)
 
-                if not math.isnan(angle):
-                    METRICS.setValue(angle)
-                    #pretty_print(angle)
-                    ss.do(ts, angle)
-            else:
-                print("Bad STO (self test output) {} for {}".format(sto, line))
+                if -70 < int(sto) < 70:
+                    angle = float(angle)
+                    ts = float(ts)
 
-            time.sleep(0.01)
+                    if time.time() - ts > 0.1:
+                        log("ERROR: sensor data is too stale")
+                        sys.exit(1)
 
+                    if not math.isnan(angle):
+                        METRICS.setValue(angle)
+                        recorder.do(ts, angle, f)
+                    else:
+                        log("did not get angle")
 
-    except KeyboardInterrupt:
-        GPIO.cleanup()
+                        
+                else:
+                    log("Bad STO (self test output) {} for {}".format(sto, line))
+
+                time.sleep(0.01)
+
+            motor_off(arm_channel)
+
+        except KeyboardInterrupt:
+            motor_off(arm_channel)
+            GPIO.cleanup()

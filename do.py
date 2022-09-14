@@ -202,6 +202,14 @@ def pretty_print_pow(measured_power):
 
     log(label + ("*" * int(term_width * ratio)))
 
+def pretty_print_deg(angle_degrees):
+    label = "Angle (degrees): %.3f " % angle_degrees
+    term_width = get_terminal_size()[0] - len(label) - 1
+    ratio = (angle_degrees) / 180
+    log(label + ("*" * int(term_width * ratio)))
+
+
+
 
 LAST_WATTS_READ = None
 
@@ -515,13 +523,6 @@ def wait_for_wobble_to_stop():
         angles_while_wobble.append(angle)
         if not has_wobble(angles_while_wobble):
             break
-
-def pretty_print_deg(angle_degrees):
-    label = "Angle (degrees): %.3f " % angle_degrees
-    term_width = get_terminal_size()[0] - len(label) - 1
-    ratio = (angle_degrees) / 180
-    log(label + ("*" * int(term_width * ratio)))
-
 
 class TrackerState(object):
     def __init__(self):

@@ -286,7 +286,7 @@ void setMode1(int h) {
 
   while (true) {
     readSPIFrame(h, SW_Reset, &rw, &addr, &rs, &data1, &data2, &crc_ok);
-    time_sleep(1.0 / 1000);  // 1 ms, as per recommeded startup sequence
+    time_sleep(1.0 / 1000);  // 1 ms, as per recommeded startup sequence, Table 11, Step 1.2
     // Change to MODE 4: Inclination mode
     // 10 Hz 1st order low
     // pass filter
@@ -295,7 +295,7 @@ void setMode1(int h) {
     if (!crc_ok) {
       continue;
     }
-    time_sleep(100.0 / 1000);  // 100 ms, as per recommeded startup sequence
+    time_sleep(100.0 / 1000);  // 100 ms, as per recommeded startup sequence, Table 11, Step 6
 
     readSPIFrame(h, Read_Status_Summary, &rw, &addr, &rs, &data1, &data2, &crc_ok);
     time_sleep(1 / MODE1_HZ);
