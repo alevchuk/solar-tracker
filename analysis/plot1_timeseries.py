@@ -8,10 +8,10 @@ from sklearn.linear_model import LinearRegression
 
 matplotlib.use('TkAgg')
 
-series = read_csv('~/measurements.csv', header=0, index_col=4)
+series = read_csv('~/measurements-2022-09-14-windy-day.csv', header=0, index_col=4)
 
 ext = True
-gen = 2082
+gen = 1306
 
 series = series[series["gen"] == gen]
 series = series[series["ext"] == ext]
