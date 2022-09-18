@@ -10,7 +10,7 @@ matplotlib.use('TkAgg')
 matplotlib.style.use('ggplot')
 
 # head -n1 ~/measurements.csv > ~/gen1.csv && awk -F, '$3 == 1 {print $0}' ~/measurements.csv >> ~/gen1.csv 
-df = read_csv('~/measurements-2022-09-14-fast-moves-with-watts2.csv', header=0)
+df = read_csv('~/measurements-2022-09-18-with-stops.csv', header=0)
 
 def show_gens(df):
     meta = {}
@@ -26,11 +26,9 @@ def show_gens(df):
         count += 1
         print("{} offset: {:.2f} hours gen: {}".format(count, (ts - first_ts) / 3600, gen))
 
-## show_gens(df); sys.exit()
+#show_gens(df); sys.exit()
 
-gen = 5502718  # 70w
-gen = 2083620
-gen = 1415321
+gen = 281823
 
 series = df[df["gen"] == gen].copy()
 

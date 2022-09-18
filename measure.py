@@ -82,10 +82,8 @@ logging.getLogger("imported_module").setLevel(logging.WARNING)
 
 LAST_WATTS_READ = None
 
-class WattsFetcherThread(threading.Thread):
+class WattsFetcher(object):
     def __init__(self):
-        self.last_sensor_read = None
-
         # Instantiate the ina object with the above constants
         self.ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS, address=0x40)
         # Configure the object with the expected bus voltage
@@ -98,41 +96,13 @@ class WattsFetcherThread(threading.Thread):
         #    time.sleep(0.1)
         #    continue
 
-        threading.Thread.__init__(self)
-        self.daemon = True
-        self.stop_reads = False
-        self.start()
-
     def read(self):
-        if self.last_sensor_read is None:
-            return None
-        else:
-            last = self.last_sensor_read.copy()
-            age = time.time() - last['read_at']
-            measured_power = last['value']
+        try:
+            measured_power = self.ina.power()  # Power in milliwatts
+            return {"milliwatts": measured_power, "ts": time.time()}
 
-            return {"milliwatts": measured_power, "ts": last['read_at']}
-
-    def _read(self):
-        while True:
-            try:
-                measured_power = self.ina.power()  # Power in milliwatts
-                return measured_power
-
-            except Exception as e:
-                log("Exception when reading from INA, {}".format(e))
-
-            time.sleep(MEASURE_SLEEP)
-
-
-    def run(self):
-        while (not self.stop_reads):
-            value = self._read()
-            self.last_sensor_read = {'value': value, 'read_at': time.time()}
-            time.sleep(MEASURE_SLEEP)
-
-# Run in the background
-LAST_WATTS_READ = WattsFetcherThread()
+        except Exception as e:
+            log("Exception when reading from INA, {}".format(e))
 
 
 class Metrics(object):
@@ -300,6 +270,7 @@ def get_line():
         return s.recv(1024)
 
 if __name__ == "__main__":
+    wattsFetcher = WattsFetcher()
     duration = 30
     if len(sys.argv) > 1 and sys.argv[1] == "1":
         is_ext = True
@@ -349,7 +320,7 @@ if __name__ == "__main__":
 
                                 if not math.isnan(angle):
                                     METRICS.setValue(angle)
-                                    shunt_data = LAST_WATTS_READ.read()
+                                    shunt_data = wattsFetcher.read()
                                     recorder.do(ts, angle, f, shunt_data)
                                 else:
                                     log("did not get angle")
@@ -363,7 +334,7 @@ if __name__ == "__main__":
                     motor_off(arm_channel)
                     a.write("OFF2\t{}\n".format(time.time()))
 
-                    time.sleep(duration)
+                    time.sleep(MEASURE_SLEEP)
 
                 except KeyboardInterrupt:
                     GPIO.cleanup()
