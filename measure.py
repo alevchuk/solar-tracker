@@ -111,9 +111,6 @@ class WattsFetcherThread(threading.Thread):
             age = time.time() - last['read_at']
             measured_power = last['value']
 
-            if age > MEASURE_SLEEP:
-                return None
-
             return {"milliwatts": measured_power, "ts": last['read_at']}
 
     def _read(self):
