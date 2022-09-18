@@ -32,6 +32,8 @@ MEASURE_SLEEP = 0.01
 
 SENSOR_PORT = 2017
 MEASUREMENTS_FILE = "/home/pi/measurements.txt"
+MEASUREMENTS_FILE = "/home/pi/measurements.txt"
+ACTUATOR_FILE = "/home/pi/actuator.txt"
 
 HOME = os.path.expanduser("~")
 
@@ -53,20 +55,24 @@ def setup():
     # GPIO setup
     GPIO.setmode(GPIO.BCM)
 
-
 def motor_on(pin):
+    setup()
+    GPIO.setup(pin, GPIO.OUT)
     GPIO.output(pin, GPIO.HIGH)  # Turn motor on
 
 def motor_off(pin):
+    setup()
+    GPIO.setup(pin, GPIO.OUT)
     GPIO.output(pin, GPIO.LOW)  # Turn motor off
 
 def ext(duration_s):
-    GPIO.setup(ext_channel, GPIO.OUT)
+    setup()
     motor_on(ext_channel)
     time.sleep(duration_s)
     motor_off(ext_channel)
 
 def ret(duration_s):
+    setup()
     GPIO.setup(ret_channel, GPIO.OUT)
     motor_on(ret_channel)
     time.sleep(duration_s)
@@ -94,9 +100,8 @@ class WattsFetcherThread(threading.Thread):
 
         threading.Thread.__init__(self)
         self.daemon = True
+        self.stop_reads = False
         self.start()
-
-
 
     def read(self):
         if self.last_sensor_read is None:
@@ -115,9 +120,6 @@ class WattsFetcherThread(threading.Thread):
         while True:
             try:
                 measured_power = self.ina.power()  # Power in milliwatts
-
-                # log(ina.voltage()) ?
-
                 return measured_power
 
             except Exception as e:
@@ -127,9 +129,8 @@ class WattsFetcherThread(threading.Thread):
 
 
     def run(self):
-        while (True):
+        while (not self.stop_reads):
             value = self._read()
-
             self.last_sensor_read = {'value': value, 'read_at': time.time()}
             time.sleep(MEASURE_SLEEP)
 
@@ -199,15 +200,17 @@ class MetricsListenerThread(threading.Thread):
         self.i = i
         self.daemon = True
         self.start()
+        self.httpd = None
 
     def run(self):
         httpd = HTTPServer(Metrics.ADDR, MetricsHandler, False)
         httpd.socket = sock
         httpd.server_bind = self.server_close = lambda self: None
         httpd.serve_forever()
+        self.httpd = httpd
 
 # Launch listener threads for Metrics
-[MetricsListenerThread(i) for i in range(Metrics.NUM_LISTENER_THREADS)]
+LISTENER_THREADS = [MetricsListenerThread(i) for i in range(Metrics.NUM_LISTENER_THREADS)]
 
 def pretty_print_pow(measured_power):
     label = "Power: %.3f W " % (measured_power / 1000)
@@ -300,7 +303,7 @@ def get_line():
         return s.recv(1024)
 
 if __name__ == "__main__":
-    duration = 80
+    duration = 30
     if len(sys.argv) > 1 and sys.argv[1] == "1":
         is_ext = True
     else:
@@ -312,49 +315,65 @@ if __name__ == "__main__":
         arm_channel = ret_channel
 
     recorder = MeasurementsRecorder(is_ext)
-    setup()
 
-    GPIO.setup(arm_channel, GPIO.OUT)
-    motor_on(arm_channel)
-    with open(MEASUREMENTS_FILE, "a") as f:
-        try:
-            while True:
-                if time.time() - START_TIME > duration:
-                    break
-
-                line = None
+    num_stops = 8
+    duration /= num_stops
+    for _ in range(num_stops):
+        start_time = time.time()
+        with open(ACTUATOR_FILE, "a") as a:
+            a.write("ON1\t{}\n".format(time.time()))
+            motor_on(arm_channel)
+            a.write("ON2\t{}\n".format(time.time()))
+            with open(MEASUREMENTS_FILE, "a") as f:
                 try:
-                    line = get_line()
-                    ts, x, y, z, angle, crc_ok_rate, sto = line.split(b'\t')
-                except Exception as e:
-                    log("ERROR: could not read data from network")
-                    log(repr(e))
-                    log(repr(line))
-                    sys.exit(1)
+                    done = False
+                    while not done:
+                        if time.time() - start_time > duration:
+                            log("time for a stop")
+                            done = True
+                        else:
+                            line = None
+                            try:
+                                line = get_line()
+                                ts, x, y, z, angle, crc_ok_rate, sto = line.split(b'\t')
+                            except Exception as e:
+                                log("ERROR: could not read data from network")
+                                log(repr(e))
+                                log(repr(line))
+                                sys.exit(1)
 
-                if -70 < int(sto) < 70:
-                    angle = float(angle)
-                    ts = float(ts)
+                            if -70 < int(sto) < 70:
+                                angle = float(angle)
+                                ts = float(ts)
 
-                    if time.time() - ts > 0.1:
-                        log("ERROR: sensor data is too stale")
-                        sys.exit(1)
+                                if time.time() - ts > 0.1:
+                                    log("ERROR: sensor data is too stale")
+                                    sys.exit(1)
 
-                    if not math.isnan(angle):
-                        METRICS.setValue(angle)
-                        shunt_data = LAST_WATTS_READ.read()
-                        recorder.do(ts, angle, f, shunt_data)
-                    else:
-                        log("did not get angle")
+                                if not math.isnan(angle):
+                                    METRICS.setValue(angle)
+                                    shunt_data = LAST_WATTS_READ.read()
+                                    recorder.do(ts, angle, f, shunt_data)
+                                else:
+                                    log("did not get angle")
 
-                        
-                else:
-                    log("Bad STO (self test output) {} for {}".format(sto, line))
+                            else:
+                                log("Bad STO (self test output) {} for {}".format(sto, line))
 
-                time.sleep(MEASURE_SLEEP)
+                            time.sleep(MEASURE_SLEEP)
 
-            motor_off(arm_channel)
+                    a.write("OFF1\t{}\n".format(time.time()))
+                    motor_off(arm_channel)
+                    a.write("OFF2\t{}\n".format(time.time()))
 
-        except KeyboardInterrupt:
-            motor_off(arm_channel)
-            GPIO.cleanup()
+                    time.sleep(duration)
+
+                except KeyboardInterrupt:
+                    GPIO.cleanup()
+                    motor_off(arm_channel)
+                    LAST_WATTS_READ.stop_reads = True
+                    LAST_WATTS_READ.join()
+                    log("done")
+
+                finally:
+                    GPIO.cleanup()
