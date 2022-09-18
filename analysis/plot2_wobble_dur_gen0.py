@@ -1,4 +1,4 @@
-#!/home/nky/solar-tracker/data-analysis/bin/python3
+#!/usr/bin/env python3
 
 from pandas import read_csv
 from matplotlib import pyplot
@@ -9,10 +9,48 @@ import sys
 matplotlib.use('TkAgg')
 matplotlib.style.use('ggplot')
 
-ext = False
 # head -n1 ~/measurements.csv > ~/gen1.csv && awk -F, '$3 == 1 {print $0}' ~/measurements.csv >> ~/gen1.csv 
-data = read_csv('~/gen1.csv', header=0, index_col=4)
+df = read_csv('~/measurements-2022-09-14-fast-moves-with-watts2.csv', header=0)
 
+def show_gens(df):
+    meta = {}
+    gens_list = df["gen"].unique()
+    for gen in gens_list:
+        subset = df[df["gen"] == gen]
+        meta[min(subset["ts"])] = gen
+    
+    first_ts = df["ts"][0]
+    count = 0
+    for t in sorted(meta.items(), key=lambda x:x[0], reverse=False):
+        ts, gen = t
+        count += 1
+        print("{} offset: {:.2f} hours gen: {}".format(count, (ts - first_ts) / 3600, gen))
+
+## show_gens(df); sys.exit()
+
+gen = 5502718  # 70w
+gen = 2083620
+gen = 1415321
+
+series = df[df["gen"] == gen].copy()
+
+
+
+# todo fill-in missing timestamps for watts
+series = series[series["watts"] != "None"]
+series["watts"] = series["watts"] / 1000 
+print(series)
+series["watts_ts_offset"] = series["watts_ts"] - float(series.head(1)["watts_ts"])
+plot1 = series.plot(x="watts_ts_offset", y="watts", fontsize=20)
+plot1.set_title("Watts change over time", fontsize=20)
+
+series["ts_offset"] = series["ts"] - float(series.head(1)["ts"])
+plot2 = series.plot(x="ts_offset", y="angle", fontsize=20, ax=plot1)
+
+plot2.set_title("Angle change over time", fontsize=20)
+pyplot.show()
+
+sys.exit()
 
 #<><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
 #
@@ -66,6 +104,5 @@ pyplot.legend(["stable", "angle"], loc=2, prop={'size': 40})
 #plot1 = data.plot(y="sma", fontsize=20)
 #plot2 = data.plot(y="angle", fontsize=20)
 
-pyplot.show()
 
 # df2 = data.head(1000)["angle"]

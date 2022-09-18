@@ -8,8 +8,8 @@ run:
 
 == (sometimes) Every time you get a new measurements.txt file ==
 ```
-echo ts,delay,gen,ext,count,angle > ~/measurements.csv
-cat ~/measurements.txt | tr '\t' ',' >> ~/measurements.csv
+echo ts,delay,gen,ext,count,angle,watts,watts_ts > ~/measurements.csv
+cat ~/measurements.txt | sed 's/None//g' | tr '\t' ',' >> ~/measurements.csv
 ```
 
 == (rare) Every time you get a fresh linux install ==
