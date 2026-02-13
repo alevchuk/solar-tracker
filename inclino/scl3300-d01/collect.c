@@ -134,7 +134,7 @@ void readSPIFrame(int h, const char next_cmd[], uint8_t* rw, uint8_t* addr, uint
   // this is according to datasheet_scl3300-d01 section 5.1.3 "SPI frame"
   char data[4], cmd[4];
 
-  time_sleep(1 / MODE1_HZ);
+  time_sleep(1.0 / MODE1_HZ);
 
   memcpy(cmd, next_cmd, 4);
   spiXfer(h, cmd, data, 4);
@@ -298,11 +298,11 @@ void setMode1(int h) {
     time_sleep(100.0 / 1000);  // 100 ms, as per recommeded startup sequence, Table 11, Step 6
 
     readSPIFrame(h, Read_Status_Summary, &rw, &addr, &rs, &data1, &data2, &crc_ok);
-    time_sleep(1 / MODE1_HZ);
+    time_sleep(1.0 / MODE1_HZ);
 
     while (true) {
       readSPIFrame(h, Read_Status_Summary, &rw, &addr, &rs, &data1, &data2, &crc_ok);
-      time_sleep(1 / MODE1_HZ);
+      time_sleep(1.0 / MODE1_HZ);
       if (crc_ok) {
         // printSPIFrame(rw, addr, rs, data1, data2, crc_ok);
         if (rs == 0b00000001) {
@@ -415,7 +415,7 @@ void swResetAndCheck(int h) {
   char data1, data2;
 
   setMode1(h);
-  time_sleep(1 / MODE1_HZ);
+  time_sleep(1.0 / MODE1_HZ);
 
 
   // WHOAMI
@@ -426,7 +426,7 @@ void swResetAndCheck(int h) {
     if (data2 == 0xC1) {
       return;
     }
-    time_sleep(1 / MODE1_HZ);
+    time_sleep(1.0 / MODE1_HZ);
   }
 
   printf("ERROR: can't communicated to SPI device, "
