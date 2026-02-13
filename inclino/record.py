@@ -3,9 +3,10 @@ import socket
 import json
 import time
 import os
+from datetime import date
 
 PORT = 2017
-OUTPUT_FILE = os.path.expanduser("~/inclino.jsonl")
+OUTPUT_FILE = os.path.expanduser(f"~/inclino-{date.today()}.jsonl")
 INTERVAL = 60
 
 
