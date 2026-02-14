@@ -120,7 +120,7 @@ const int MODE1_HZ = 40;
 const int MODE2_HZ = 70;
 const int MODE3_HZ = 10;
 const int MODE4_HZ = 10;
-const int speedSPI = 50000;  // SPI communication speed, bps, SCL3300 clock needs to be between 2 and 4 MHz?
+const int speedSPI = 2000000;  // SPI communication speed, 2 MHz per datasheet Table 8 recommendation
 
 // Global status
 int stats_frame_count = 0;
@@ -134,7 +134,7 @@ void readSPIFrame(int h, const char next_cmd[], uint8_t* rw, uint8_t* addr, uint
   // this is according to datasheet_scl3300-d01 section 5.1.3 "SPI frame"
   char data[4], cmd[4];
 
-  time_sleep(1.0 / MODE1_HZ);
+  time_sleep(1.0 / MODE4_HZ);
 
   memcpy(cmd, next_cmd, 4);
   spiXfer(h, cmd, data, 4);
@@ -279,7 +279,7 @@ short readSTO(int h, const char next_command_hint[]) {
   return -100;
 }
 
-void setMode1(int h) {
+void setMode4(int h) {
   bool crc_ok;
   uint8_t rw, addr, rs;
   char data1, data2;
@@ -288,21 +288,20 @@ void setMode1(int h) {
     readSPIFrame(h, SW_Reset, &rw, &addr, &rs, &data1, &data2, &crc_ok);
     time_sleep(1.0 / 1000);  // 1 ms, as per recommeded startup sequence, Table 11, Step 1.2
     // Change to MODE 4: Inclination mode
-    // 10 Hz 1st order low
-    // pass filter
-    // Low noise mode
-    readSPIFrame(h, Change_to_mode_1, &rw, &addr, &rs, &data1, &data2, &crc_ok);
+    // 10 Hz 1st order low pass filter
+    // Low noise mode, 12000 LSB/g, ±10° range
+    readSPIFrame(h, Change_to_mode_4, &rw, &addr, &rs, &data1, &data2, &crc_ok);
     if (!crc_ok) {
       continue;
     }
     time_sleep(100.0 / 1000);  // 100 ms, as per recommeded startup sequence, Table 11, Step 6
 
     readSPIFrame(h, Read_Status_Summary, &rw, &addr, &rs, &data1, &data2, &crc_ok);
-    time_sleep(1.0 / MODE1_HZ);
+    time_sleep(1.0 / MODE4_HZ);
 
     while (true) {
       readSPIFrame(h, Read_Status_Summary, &rw, &addr, &rs, &data1, &data2, &crc_ok);
-      time_sleep(1.0 / MODE1_HZ);
+      time_sleep(1.0 / MODE4_HZ);
       if (crc_ok) {
         // printSPIFrame(rw, addr, rs, data1, data2, crc_ok);
         if (rs == 0b00000001) {
@@ -356,13 +355,13 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
   n = snprintf(p, dataCapacity, "%f\t", time_time());
 	p += n; dataCapacity -= n;
 	
-  n = snprintf(p, dataCapacity, "%f\t", (float)x / MODE1_SENSITIVITY);
+  n = snprintf(p, dataCapacity, "%f\t", (float)x / MODE4_SENSITIVITY);
 	p += n; dataCapacity -= n;
 
-  n = snprintf(p, dataCapacity, "%f\t", (float)y / MODE1_SENSITIVITY);
+  n = snprintf(p, dataCapacity, "%f\t", (float)y / MODE4_SENSITIVITY);
 	p += n; dataCapacity -= n;
 
-  n = snprintf(p, dataCapacity, "%f\t", (float)z / MODE1_SENSITIVITY);
+  n = snprintf(p, dataCapacity, "%f\t", (float)z / MODE4_SENSITIVITY);
 	p += n; dataCapacity -= n;
 
   n = snprintf(p, dataCapacity, "%f\t", angle_deg);
@@ -384,18 +383,18 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
 
   // // raw
   //  printf("%f\t", time_time());
-  //  printf("%f\t", (float)x / MODE1_SENSITIVITY);
-  //  printf("%f\t", (float)y / MODE1_SENSITIVITY);
-  //  printf("%f\t", (float)z / MODE1_SENSITIVITY);
+  //  printf("%f\t", (float)x / MODE4_SENSITIVITY);
+  //  printf("%f\t", (float)y / MODE4_SENSITIVITY);
+  //  printf("%f\t", (float)z / MODE4_SENSITIVITY);
   //  printf("%f\t", angle_deg);
   //  printf("%.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
   //  printf("%d\t", sto);
 
 	// // human
   //  printf("ts = %f\t", time_time());
-  //  printf("x = %fg\t", (float)x / MODE1_SENSITIVITY);
-  //  printf("y = %fg\t", (float)y / MODE1_SENSITIVITY);
-  //  printf("z = %fg\t", (float)z / MODE1_SENSITIVITY);
+  //  printf("x = %fg\t", (float)x / MODE4_SENSITIVITY);
+  //  printf("y = %fg\t", (float)y / MODE4_SENSITIVITY);
+  //  printf("z = %fg\t", (float)z / MODE4_SENSITIVITY);
   //  printf("angle = %f\t", angle_deg);
   //  printf("crc_ok_rate = %.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
   //  printf("sto = %d\t", sto);
@@ -414,8 +413,8 @@ void swResetAndCheck(int h) {
   uint8_t rw, addr, rs;
   char data1, data2;
 
-  setMode1(h);
-  time_sleep(1.0 / MODE1_HZ);
+  setMode4(h);
+  time_sleep(1.0 / MODE4_HZ);
 
 
   // WHOAMI
@@ -426,7 +425,7 @@ void swResetAndCheck(int h) {
     if (data2 == 0xC1) {
       return;
     }
-    time_sleep(1.0 / MODE1_HZ);
+    time_sleep(1.0 / MODE4_HZ);
   }
 
   printf("ERROR: can't communicated to SPI device, "
