@@ -56,6 +56,7 @@ const char ACC_X  =  0x01;
 const char ACC_Y  =  0x02;
 const char ACC_Z  =  0x03;
 const char STO    =  0x04;
+const char TEMP   =  0x05;
 const char STATUS =  0x06;
 const char MODE   =  0x0D;
 const char WHOAMI =  0x10;
@@ -259,6 +260,24 @@ short readAcc(int h, const char command[], const char next_command_hint[]) {
   return -100;
 }
 
+short readTemperature(int h, const char next_command_hint[]) {
+  short retval;
+
+  bool crc_ok;
+  uint8_t rw, addr, rs;
+  char data1, data2;
+
+  readSPIFrame(h, next_command_hint, &rw, &addr, &rs, &data1, &data2, &crc_ok);
+  if (crc_ok) {
+    if (addr == TEMP) {
+        retval = (data1 << 8) | data2;
+        return retval;
+    }
+  }
+
+  return -1000;
+}
+
 short readSTO(int h, const char next_command_hint[]) {
   short retval;
 
@@ -317,8 +336,8 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
 	char* end = dataSending + dataCapacity;
 	int n = 0;
 
-  short x = -100, y = -100, z = -100, sto = -100;
-  while (x == -100 || y == -100 || z == -100 || sto == -100) {
+  short x = -100, y = -100, z = -100, sto = -100, temp_raw = -1000;
+  while (x == -100 || y == -100 || z == -100 || sto == -100 || temp_raw == -1000) {
     // read X
     writeOnly(h, Read_ACC_X);
     x = readAcc(h, Read_ACC_X, Read_Status_Summary);
@@ -334,7 +353,14 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
     // read STO
     writeOnly(h, Read_STO);
     sto = readSTO(h, Read_Status_Summary);
+
+    // read Temperature
+    writeOnly(h, Read_Temperature);
+    temp_raw = readTemperature(h, Read_Status_Summary);
   }
+
+  // Convert temperature: section 2.4 of datasheet
+  double temp_celsius = -273.0 + ((double)temp_raw / 18.9);
 
 	double len;
   double angle, angle_deg;
@@ -370,7 +396,10 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
   n = snprintf(p, dataCapacity, "%.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
 	p += n; dataCapacity -= n;
 
-  n = snprintf(p, dataCapacity, "%d", sto);
+  n = snprintf(p, dataCapacity, "%d\t", sto);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%.2f", temp_celsius);
 	p += n; dataCapacity -= n;
 
   n = snprintf(p, dataCapacity, "\n");

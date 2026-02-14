@@ -15,6 +15,7 @@ g_deg = Gauge("inclinometer_deg", "Tilt angle (degrees)")
 g_crc = Gauge("inclinometer_crc", "CRC ok rate")
 g_sto = Gauge("inclinometer_sto", "Self-test output")
 g_ts = Gauge("inclinometer_timestamp", "Sensor reading timestamp (unix)")
+g_temp = Gauge("inclinometer_temp_celsius", "SCL3300 sensor temperature (celsius)")
 
 
 def get_reading():
@@ -23,7 +24,7 @@ def get_reading():
         s.connect((INCLO_HOST, INCLO_PORT))
         data = s.recv(1024).decode().strip()
     parts = data.split("\t")
-    return {
+    reading = {
         "ts": float(parts[0]),
         "x": float(parts[1]),
         "y": float(parts[2]),
@@ -32,6 +33,9 @@ def get_reading():
         "crc": float(parts[5]),
         "sto": int(parts[6]),
     }
+    if len(parts) > 7:
+        reading["temp"] = float(parts[7])
+    return reading
 
 
 def update_metrics():
@@ -44,6 +48,8 @@ def update_metrics():
         g_crc.set(r["crc"])
         g_sto.set(r["sto"])
         g_ts.set(r["ts"])
+        if "temp" in r:
+            g_temp.set(r["temp"])
     except Exception as e:
         print(f"Error reading inclinometer: {e}")
 

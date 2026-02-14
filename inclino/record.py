@@ -19,7 +19,7 @@ def get_reading():
         s.connect(("127.0.0.1", PORT))
         data = s.recv(1024).decode().strip()
     parts = data.split("\t")
-    return {
+    reading = {
         "ts": round(float(parts[0]), 1),
         "x": float(parts[1]),
         "y": float(parts[2]),
@@ -28,6 +28,9 @@ def get_reading():
         "crc": round(float(parts[5]), 2),
         "sto": int(parts[6]),
     }
+    if len(parts) > 7:
+        reading["temp"] = round(float(parts[7]), 2)
+    return reading
 
 
 def main():
