@@ -6,8 +6,11 @@ import os
 from datetime import date
 
 PORT = 2017
-OUTPUT_FILE = os.path.expanduser(f"~/inclino-{date.today()}.jsonl")
 INTERVAL = 60
+
+
+def output_file():
+    return os.path.expanduser(f"~/inclino-{date.today()}.jsonl")
 
 
 def get_reading():
@@ -28,11 +31,11 @@ def get_reading():
 
 
 def main():
-    print(f"Recording to {OUTPUT_FILE} every {INTERVAL}s")
+    print(f"Recording to {output_file()} every {INTERVAL}s")
     while True:
         try:
             reading = get_reading()
-            with open(OUTPUT_FILE, "a") as f:
+            with open(output_file(), "a") as f:
                 f.write(json.dumps(reading) + "\n")
             print(f"{reading['ts']:.0f}  deg={reading['deg']}")
         except Exception as e:
