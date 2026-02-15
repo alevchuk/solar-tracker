@@ -30,6 +30,10 @@ def get_reading():
     }
     if len(parts) > 7:
         reading["temp"] = round(float(parts[7]), 2)
+    if len(parts) > 10:
+        reading["ang_x"] = round(float(parts[8]), 4)
+        reading["ang_y"] = round(float(parts[9]), 4)
+        reading["ang_z"] = round(float(parts[10]), 4)
     return reading
 
 

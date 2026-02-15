@@ -47,6 +47,10 @@ const char Read_ACC_Y[] =   {0x08, 0x00, 0x00, 0xFD};
 const char Read_ACC_Z[] =   {0x0C, 0x00, 0x00, 0xFB};
 const char Read_STO[] =       {0x10, 0x00, 0x00, 0xE9};
 const char Read_Temperature[] = {0x14, 0x00, 0x00, 0xEF};
+const char Read_ANG_X[] =     {0x24, 0x00, 0x00, 0xC7};
+const char Read_ANG_Y[] =     {0x28, 0x00, 0x00, 0xCD};
+const char Read_ANG_Z[] =     {0x2C, 0x00, 0x00, 0xCB};
+const char Enable_ANG[] =     {0xB0, 0x00, 0x1F, 0x6F};
 const char Change_to_mode_1[] = {0xB4, 0x00, 0x00, 0x1F};
 const char Change_to_mode_2[] = {0xB4, 0x00, 0x01, 0x02};
 const char Change_to_mode_3[] = {0xB4, 0x00, 0x02, 0x25};
@@ -60,6 +64,10 @@ const char ACC_Z  =  0x03;
 const char STO    =  0x04;
 const char TEMP   =  0x05;
 const char STATUS =  0x06;
+const char ANG_X_REG = 0x09;
+const char ANG_Y_REG = 0x0A;
+const char ANG_Z_REG = 0x0B;
+const char ANG_CTRL  = 0x0C;
 const char MODE   =  0x0D;
 const char WHOAMI =  0x10;
 const char SELBANK = 0x1F;
@@ -77,6 +85,7 @@ const int PORT = 2017;
 typedef struct {
     int64_t sum_x, sum_y, sum_z;
     int64_t sum_temp;
+    int64_t sum_ang_x, sum_ang_y, sum_ang_z;
     uint32_t count;
     short last_sto;
     pthread_mutex_t mutex;
@@ -84,7 +93,9 @@ typedef struct {
 
 static accumulator_t g_acc = {
     .sum_x = 0, .sum_y = 0, .sum_z = 0,
-    .sum_temp = 0, .count = 0, .last_sto = -100,
+    .sum_temp = 0,
+    .sum_ang_x = 0, .sum_ang_y = 0, .sum_ang_z = 0,
+    .count = 0, .last_sto = -100,
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
 
@@ -283,6 +294,28 @@ short readAcc(int h, const char command[], const char next_command_hint[]) {
   return -100;
 }
 
+short readAngle(int h, const char command[], const char next_command_hint[]) {
+  short retval;
+
+  bool crc_ok;
+  uint8_t rw, addr, rs;
+  uint8_t data1, data2;
+
+  readSPIFrame(h, next_command_hint, &rw, &addr, &rs, &data1, &data2, &crc_ok);
+  if (crc_ok) {
+    if (
+      ( command == Read_ANG_X && addr == ANG_X_REG ) ||
+      ( command == Read_ANG_Y && addr == ANG_Y_REG ) ||
+      ( command == Read_ANG_Z && addr == ANG_Z_REG )
+    ) {
+        retval = (data1 << 8) | data2;
+        return retval;
+    }
+  }
+
+  return -32768;
+}
+
 short readTemperature(int h, const char next_command_hint[]) {
   short retval;
 
@@ -336,6 +369,10 @@ void setMode4(int h) {
     if (!crc_ok) {
       continue;
     }
+
+    // Enable angle outputs (ANG_CTRL = 0x1F), Table 11 Step 5
+    readSPIFrame(h, Enable_ANG, &rw, &addr, &rs, &data1, &data2, &crc_ok);
+
     time_sleep(100.0 / 1000);  // 100 ms, as per recommeded startup sequence, Table 11, Step 6
 
     readSPIFrame(h, Read_Status_Summary, &rw, &addr, &rs, &data1, &data2, &crc_ok);
@@ -364,6 +401,7 @@ void *reader_thread(void *arg) {
 
   while (true) {
     short x = -100, y = -100, z = -100, sto = -100, temp_raw = -1000;
+    short ang_x = -32768, ang_y = -32768, ang_z = -32768;
 
     // read X
     writeOnly(h, Read_ACC_X);
@@ -383,15 +421,31 @@ void *reader_thread(void *arg) {
 
     // read Temperature
     writeOnly(h, Read_Temperature);
-    temp_raw = readTemperature(h, Read_ACC_X);
+    temp_raw = readTemperature(h, Read_ANG_X);
+
+    // read ANG_X
+    writeOnly(h, Read_ANG_X);
+    ang_x = readAngle(h, Read_ANG_X, Read_ANG_Y);
+
+    // read ANG_Y
+    writeOnly(h, Read_ANG_Y);
+    ang_y = readAngle(h, Read_ANG_Y, Read_ANG_Z);
+
+    // read ANG_Z
+    writeOnly(h, Read_ANG_Z);
+    ang_z = readAngle(h, Read_ANG_Z, Read_ACC_X);
 
     // Only accumulate if all reads succeeded
-    if (x != -100 && y != -100 && z != -100 && temp_raw != -1000) {
+    if (x != -100 && y != -100 && z != -100 && temp_raw != -1000
+        && ang_x != -32768 && ang_y != -32768 && ang_z != -32768) {
       pthread_mutex_lock(&g_acc.mutex);
       g_acc.sum_x += x;
       g_acc.sum_y += y;
       g_acc.sum_z += z;
       g_acc.sum_temp += temp_raw;
+      g_acc.sum_ang_x += ang_x;
+      g_acc.sum_ang_y += ang_y;
+      g_acc.sum_ang_z += ang_z;
       g_acc.count++;
       if (sto != -100) {
         g_acc.last_sto = sto;
@@ -411,6 +465,7 @@ void collectSensorData(char *dataSending, size_t dataCapacity) {
 
   // Snapshot accumulated samples and reset
   int64_t snap_x, snap_y, snap_z, snap_temp;
+  int64_t snap_ang_x, snap_ang_y, snap_ang_z;
   uint32_t snap_count;
   short snap_sto;
 
@@ -419,12 +474,18 @@ void collectSensorData(char *dataSending, size_t dataCapacity) {
   snap_y = g_acc.sum_y;
   snap_z = g_acc.sum_z;
   snap_temp = g_acc.sum_temp;
+  snap_ang_x = g_acc.sum_ang_x;
+  snap_ang_y = g_acc.sum_ang_y;
+  snap_ang_z = g_acc.sum_ang_z;
   snap_count = g_acc.count;
   snap_sto = g_acc.last_sto;
   g_acc.sum_x = 0;
   g_acc.sum_y = 0;
   g_acc.sum_z = 0;
   g_acc.sum_temp = 0;
+  g_acc.sum_ang_x = 0;
+  g_acc.sum_ang_y = 0;
+  g_acc.sum_ang_z = 0;
   g_acc.count = 0;
   pthread_mutex_unlock(&g_acc.mutex);
 
@@ -477,7 +538,24 @@ void collectSensorData(char *dataSending, size_t dataCapacity) {
   n = snprintf(p, dataCapacity, "%d\t", snap_sto);
 	p += n; dataCapacity -= n;
 
-  n = snprintf(p, dataCapacity, "%.2f", temp_celsius);
+  n = snprintf(p, dataCapacity, "%.2f\t", temp_celsius);
+	p += n; dataCapacity -= n;
+
+  // Angle outputs: raw / 2^14 * 90 = degrees (datasheet section 2.5)
+  double avg_ang_x = (double)snap_ang_x / snap_count;
+  double avg_ang_y = (double)snap_ang_y / snap_count;
+  double avg_ang_z = (double)snap_ang_z / snap_count;
+  double ang_x_deg = avg_ang_x / 16384.0 * 90.0;
+  double ang_y_deg = avg_ang_y / 16384.0 * 90.0;
+  double ang_z_deg = avg_ang_z / 16384.0 * 90.0;
+
+  n = snprintf(p, dataCapacity, "%.4f\t", ang_x_deg);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%.4f\t", ang_y_deg);
+	p += n; dataCapacity -= n;
+
+  n = snprintf(p, dataCapacity, "%.4f", ang_z_deg);
 	p += n; dataCapacity -= n;
 
   n = snprintf(p, dataCapacity, "\n");
