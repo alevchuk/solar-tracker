@@ -20,10 +20,10 @@ Use case: Monitoring structure integrity of a home during remodeling (wall remov
 
 ## Findings vs collect.c
 
-### 1. Switch to Mode 4 (highest impact)
+### 1. Switch to Mode 4 (highest impact) — DONE
 
-Current: Mode 1 (±1.2g, 40 Hz LPF, 6000 LSB/g)
-Recommended: Mode 4 (inclination mode, 10 Hz LPF, 12000 LSB/g, low noise)
+~~Current: Mode 1 (±1.2g, 40 Hz LPF, 6000 LSB/g)~~
+Implemented: Mode 4 (inclination mode, 10 Hz LPF, 12000 LSB/g, low noise)
 
 Per Table 2:
 - Integrated noise Mode 4 X,Z: 0.08 mg RMS vs Mode 1 which is higher
@@ -35,12 +35,12 @@ Per Table 2:
 Constraint: Mode 4 limited to ±10° tilt (section 2.11.1). Fine for structural monitoring.
 Constraint: Y-axis parallel to gravity not recommended in Mode 3/4 — mount sensor so Z-axis is vertical.
 
-collect.c change: `setMode1()` → use `Change_to_mode_4`, update sensitivity constant, wait 100ms (Table 11 step 6).
+collect.c: `setMode4()` sends `Change_to_mode_4`, enables angle outputs, waits 100ms per Table 11 step 6, then polls status until normal. Uses `MODE4_SENSITIVITY = 12000`.
 
-### 2. Use built-in angle outputs (ANG_X/Y/Z)
+### 2. Use built-in angle outputs (ANG_X/Y/Z) — DONE
 
-Current: Reads raw ACC_X/Y/Z, computes angle via dot-product with initial reading (collect.c:343-352).
-Problem: Dot product gives single scalar "deviation from initial" — loses per-axis information.
+~~Current: Reads raw ACC_X/Y/Z, computes angle via dot-product with initial reading.~~
+Implemented: Reads ANG_X/Y/Z registers alongside raw accelerometer data.
 
 The sensor computes angles internally (section 2.5) using:
 ```
@@ -51,61 +51,51 @@ ANG_Z = atan2(accz / sqrt(accx^2 + accy^2))
 
 This runs at full 2000 Hz ODR before the LPF, averaging better than software computation.
 
-collect.c changes:
-- Send `Enable ANGLE outputs` (0xB0001F6F) during startup after mode set (Table 11 step 5)
-- Add Read_ANG_X (0x240000C7), Read_ANG_Y (0x280000CD), Read_ANG_Z (0x2C0000CB)
-- Convert: `angle_deg = raw_value / 16384.0 * 90.0`
+collect.c: `Enable_ANG` (0xB0001F6F) sent during `setMode4()` startup. `readAngle()` reads ANG_X/Y/Z registers. Reader thread accumulates angle sums and `collectSensorData()` averages and converts: `angle_deg = avg_raw / 16384.0 * 90.0`. Per-axis tilt output appended to TCP response.
 
-Per-axis tilt answers "is the wall leaning east?" instead of just "something changed".
+### 3. SPI clock fixed to 2 MHz — DONE
 
-### 3. SPI clock is ~40x too slow
+~~Current: `speedSPI = 50000` (50 kHz).~~
+Implemented: `const int speedSPI = 2000000;`
 
-Current: `speedSPI = 50000` (50 kHz) at collect.c:123.
-Datasheet Table 8 footnote: "SPI communication may affect the noise level. Recommended SPI clock is 2 MHz - 4 MHz to achieve the best performance."
+Datasheet Table 8 footnote: "SPI communication may affect the noise level. Recommended SPI clock is 2 MHz - 4 MHz to achieve the best performance." Below 2 MHz, noise specs in Table 2 are not guaranteed.
 
-Below 2 MHz, noise specs in Table 2 are not guaranteed.
+### 4. Continuous ODR read loop — DONE
 
-Fix: `const int speedSPI = 2000000;`
-
-### 4. Not reading at ODR — degraded noise performance
+~~Current: Reads only on TCP request (once per 60s from record.py). Between requests, registers are not drained, degrading the internal filter.~~
+Implemented: Background `reader_thread()` runs continuously at configurable `READ_SPEED_PCT` of the 2 kHz ODR (default 100%).
 
 Datasheet section 4.1: "Registers are updated in every 0.5 ms and if all data is not read the full noise performance of sensor is not met."
 
-Current: Reads only on TCP request (once per 60s from record.py). Between requests, registers are not drained, degrading the internal filter.
+collect.c: `reader_thread()` launched via `pthread_create()` at startup, detached. Reads all registers (ACC_X/Y/Z, STO, Temperature, ANG_X/Y/Z) each cycle with 10µs inter-frame gaps. Accumulates into `g_acc` struct protected by mutex. TCP handler snapshots and resets accumulator.
 
-Fix: Run continuous read loop at ~2000 Hz, keep running average. Return averaged result on TCP request.
+### 5. Average multiple samples — DONE
 
-### 5. Average multiple samples
+~~Reading N samples per request and averaging reduces noise by √N.~~
+Implemented: `accumulator_t` struct uses `int64_t` sums to safely accumulate up to 120k+ samples between TCP requests. `collectSensorData()` divides sums by count for averaged output.
 
-Even without continuous ODR, reading N samples per request and averaging reduces noise by √N.
-With Mode 4's 10 Hz bandwidth, ~20 samples over 2 seconds is a reasonable window.
-For 60s intervals, 100 samples over 50ms → 10x noise reduction.
+At 2 kHz for 60s = 120,000 samples; int64_t avoids overflow (max sum = 120k × 32767 ≈ 3.93 billion, exceeding int32_t range).
 
-### 6. Read and log temperature
+### 6. Read and log temperature — DONE
+
+~~`Read_Temperature` (0x140000EF) is already defined but never used.~~
+Implemented: `readTemperature()` reads TEMP register every ODR cycle. Accumulated and averaged like other channels. Converted via `temp_C = -273.0 + (avg_raw / 18.9)` (section 2.4). Output as `%.2f` in TCP response.
 
 Offset temperature dependency (Table 2):
 - X, Y channels: up to ±0.57° across -40 to +125°C
 - Z channel: up to ±0.86° across full range
 
-For a house going through seasons or heated/unheated during remodel, this matters.
-`Read_Temperature` (0x140000EF) is already defined but never used.
-Conversion: `temp_C = -273.0 + (raw_temp / 18.9)` (section 2.4)
+### 7. Signed char bug — DONE
 
-Log alongside angle data for post-processing temperature-offset curve fitting.
+~~collect.c: `retval = (data1 << 8) | data2` where data1, data2 are `char` (signed on ARM). When high bit is set, data2 sign-extends on OR, corrupting upper bits.~~
+Fixed: `readSPIFrame()` outputs `uint8_t* data1, data2`. All callers (`readAcc`, `readAngle`, `readTemperature`, `readSTO`) receive `uint8_t` values, so `(data1 << 8) | data2` assembles correctly without sign extension.
 
-### 7. Signed char bug
+### 8. Excessive inter-frame delays — DONE
 
-collect.c:254: `retval = (data1 << 8) | data2` where data1, data2 are `char` (signed on ARM).
-When high bit is set, data2 sign-extends on OR, corrupting upper bits.
+~~collect.c: `time_sleep(1.0 / MODE1_HZ)` = 25ms between SPI frames.~~
+Fixed: `time_sleep(10e-6)` — 10µs inter-frame gap, matching the datasheet Table 8 TLH minimum.
 
-Fix: Use `uint8_t` for data1/data2, then: `retval = (int16_t)((uint8_t)data1 << 8 | (uint8_t)data2);`
-
-### 8. Excessive inter-frame delays
-
-collect.c:137: `time_sleep(1.0 / MODE1_HZ)` = 25ms between SPI frames.
-Datasheet Table 8: TLH minimum = 10µs.
-
-Each full read cycle (8 SPI frames) takes ~200ms currently. Could take <1ms.
+Each full read cycle (16 SPI frames for 8 registers) now takes <1ms instead of ~200ms.
 
 ### 9. Post-processing: baseline drift removal
 
