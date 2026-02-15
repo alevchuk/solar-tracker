@@ -16,6 +16,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <pthread.h>
 
 // the following is needed for the TCP server
 #include <stdio.h> // standard input and output library
@@ -62,8 +64,29 @@ const char MODE   =  0x0D;
 const char WHOAMI =  0x10;
 const char SELBANK = 0x1F;
 
+// Read speed: 1-100, percentage of max ODR speed.
+// 100 = full 2 kHz (read every 0.5ms), 50 = 1 kHz, 10 = 200 Hz, etc.
+#define READ_SPEED_PCT 100
+
 // Server
 const int PORT = 2017;
+
+// Accumulator for continuous sensor reads — uses int64_t to avoid overflow.
+// At 2 kHz for 60s = 120,000 samples; max sum = 120k * 32767 = 3.93 billion,
+// which exceeds int32_t range (2.15 billion). int64_t handles this safely.
+typedef struct {
+    int64_t sum_x, sum_y, sum_z;
+    int64_t sum_temp;
+    uint32_t count;
+    short last_sto;
+    pthread_mutex_t mutex;
+} accumulator_t;
+
+static accumulator_t g_acc = {
+    .sum_x = 0, .sum_y = 0, .sum_z = 0,
+    .sum_temp = 0, .count = 0, .last_sto = -100,
+    .mutex = PTHREAD_MUTEX_INITIALIZER
+};
 
 static uint8_t CRC8(uint8_t BitValue, uint8_t CRC)
 {
@@ -131,11 +154,11 @@ bool first_read = true;
 short x_0, y_0, z_0;
 double len_0;
 
-void readSPIFrame(int h, const char next_cmd[], uint8_t* rw, uint8_t* addr, uint8_t* rs, char* data1, char* data2, bool* crc_ok) {
+void readSPIFrame(int h, const char next_cmd[], uint8_t* rw, uint8_t* addr, uint8_t* rs, uint8_t* data1, uint8_t* data2, bool* crc_ok) {
   // this is according to datasheet_scl3300-d01 section 5.1.3 "SPI frame"
   char data[4], cmd[4];
 
-  time_sleep(1.0 / MODE4_HZ);
+  time_sleep(10e-6);  // 10µs minimum inter-frame gap (TLH), datasheet Table 8
 
   memcpy(cmd, next_cmd, 4);
   spiXfer(h, cmd, data, 4);
@@ -145,10 +168,10 @@ void readSPIFrame(int h, const char next_cmd[], uint8_t* rw, uint8_t* addr, uint
   *addr = (data[0] & 0b01111100)>>2;
   *rs =   (data[0] & 0b00000011);
 
-  *data1 = data[1];
-  *data2 = data[2];
+  *data1 = (uint8_t)data[1];
+  *data2 = (uint8_t)data[2];
 
-  uint32_t first24bits = data[0]<<24 | (data[1]<<16) | (data[2]<<8);
+  uint32_t first24bits = (uint8_t)data[0]<<24 | ((uint8_t)data[1]<<16) | ((uint8_t)data[2]<<8);
   // printf("first 24: %06X\n", first24bits);
 
   // printf("CRC calculated: %02X\n", CalculateCRC(first24bits));
@@ -231,7 +254,7 @@ void printSPIFrame(uint8_t rw, uint8_t addr, uint8_t rs, uint8_t data1, uint8_t 
 void writeOnly(int h, const char next_command_hint[]) {
   bool crc_ok;
   uint8_t rw, addr, rs;
-  char data1, data2;
+  uint8_t data1, data2;
 
   readSPIFrame(h, next_command_hint, &rw, &addr, &rs, &data1, &data2, &crc_ok);
 }
@@ -241,7 +264,7 @@ short readAcc(int h, const char command[], const char next_command_hint[]) {
 
   bool crc_ok;
   uint8_t rw, addr, rs;
-  char data1, data2;
+  uint8_t data1, data2;
 
   readSPIFrame(h, next_command_hint, &rw, &addr, &rs, &data1, &data2, &crc_ok);
   if (crc_ok) {
@@ -265,7 +288,7 @@ short readTemperature(int h, const char next_command_hint[]) {
 
   bool crc_ok;
   uint8_t rw, addr, rs;
-  char data1, data2;
+  uint8_t data1, data2;
 
   readSPIFrame(h, next_command_hint, &rw, &addr, &rs, &data1, &data2, &crc_ok);
   if (crc_ok) {
@@ -283,7 +306,7 @@ short readSTO(int h, const char next_command_hint[]) {
 
   bool crc_ok;
   uint8_t rw, addr, rs;
-  char data1, data2;
+  uint8_t data1, data2;
 
   readSPIFrame(h, next_command_hint, &rw, &addr, &rs, &data1, &data2, &crc_ok);
   if (crc_ok) {
@@ -301,7 +324,7 @@ short readSTO(int h, const char next_command_hint[]) {
 void setMode4(int h) {
   bool crc_ok;
   uint8_t rw, addr, rs;
-  char data1, data2;
+  uint8_t data1, data2;
 
   while (true) {
     readSPIFrame(h, SW_Reset, &rw, &addr, &rs, &data1, &data2, &crc_ok);
@@ -331,63 +354,118 @@ void setMode4(int h) {
   }
 }
 
-void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
+// Background thread: continuously reads sensor at ODR to maintain noise performance
+// (datasheet section 4.1) and accumulates samples for averaging.
+void *reader_thread(void *arg) {
+  int h = *(int *)arg;
+  // delay_us = 500µs * (100 / READ_SPEED_PCT)
+  // At READ_SPEED_PCT=100: 500µs = 2 kHz (full ODR)
+  double delay_s = 500e-6 * 100.0 / READ_SPEED_PCT;
+
+  while (true) {
+    short x = -100, y = -100, z = -100, sto = -100, temp_raw = -1000;
+
+    // read X
+    writeOnly(h, Read_ACC_X);
+    x = readAcc(h, Read_ACC_X, Read_ACC_Y);
+
+    // read Y
+    writeOnly(h, Read_ACC_Y);
+    y = readAcc(h, Read_ACC_Y, Read_ACC_Z);
+
+    // read Z
+    writeOnly(h, Read_ACC_Z);
+    z = readAcc(h, Read_ACC_Z, Read_STO);
+
+    // read STO
+    writeOnly(h, Read_STO);
+    sto = readSTO(h, Read_Temperature);
+
+    // read Temperature
+    writeOnly(h, Read_Temperature);
+    temp_raw = readTemperature(h, Read_ACC_X);
+
+    // Only accumulate if all reads succeeded
+    if (x != -100 && y != -100 && z != -100 && temp_raw != -1000) {
+      pthread_mutex_lock(&g_acc.mutex);
+      g_acc.sum_x += x;
+      g_acc.sum_y += y;
+      g_acc.sum_z += z;
+      g_acc.sum_temp += temp_raw;
+      g_acc.count++;
+      if (sto != -100) {
+        g_acc.last_sto = sto;
+      }
+      pthread_mutex_unlock(&g_acc.mutex);
+    }
+
+    time_sleep(delay_s);
+  }
+  return NULL;
+}
+
+void collectSensorData(char *dataSending, size_t dataCapacity) {
 	char* p = dataSending;
 	char* end = dataSending + dataCapacity;
 	int n = 0;
 
-  short x = -100, y = -100, z = -100, sto = -100, temp_raw = -1000;
-  while (x == -100 || y == -100 || z == -100 || sto == -100 || temp_raw == -1000) {
-    // read X
-    writeOnly(h, Read_ACC_X);
-    x = readAcc(h, Read_ACC_X, Read_Status_Summary);
+  // Snapshot accumulated samples and reset
+  int64_t snap_x, snap_y, snap_z, snap_temp;
+  uint32_t snap_count;
+  short snap_sto;
 
-    // read Y
-    writeOnly(h, Read_ACC_Y);
-    y = readAcc(h, Read_ACC_Y, Read_Status_Summary);
+  pthread_mutex_lock(&g_acc.mutex);
+  snap_x = g_acc.sum_x;
+  snap_y = g_acc.sum_y;
+  snap_z = g_acc.sum_z;
+  snap_temp = g_acc.sum_temp;
+  snap_count = g_acc.count;
+  snap_sto = g_acc.last_sto;
+  g_acc.sum_x = 0;
+  g_acc.sum_y = 0;
+  g_acc.sum_z = 0;
+  g_acc.sum_temp = 0;
+  g_acc.count = 0;
+  pthread_mutex_unlock(&g_acc.mutex);
 
-    // read Z
-    writeOnly(h, Read_ACC_Z);
-    z = readAcc(h, Read_ACC_Z, Read_Status_Summary);
-
-    // read STO
-    writeOnly(h, Read_STO);
-    sto = readSTO(h, Read_Status_Summary);
-
-    // read Temperature
-    writeOnly(h, Read_Temperature);
-    temp_raw = readTemperature(h, Read_Status_Summary);
+  if (snap_count == 0) {
+    snprintf(dataSending, dataCapacity, "ERROR: no samples accumulated yet\n");
+    return;
   }
 
+  // Average using double to preserve precision
+  double avg_x = (double)snap_x / snap_count;
+  double avg_y = (double)snap_y / snap_count;
+  double avg_z = (double)snap_z / snap_count;
+  double avg_temp_raw = (double)snap_temp / snap_count;
+
   // Convert temperature: section 2.4 of datasheet
-  double temp_celsius = -273.0 + ((double)temp_raw / 18.9);
+  double temp_celsius = -273.0 + (avg_temp_raw / 18.9);
 
 	double len;
   double angle, angle_deg;
 
   if (first_read) {
-      x_0 = x;
-      y_0 = y;
-      z_0 = z;
+      x_0 = (short)(avg_x + 0.5);
+      y_0 = (short)(avg_y + 0.5);
+      z_0 = (short)(avg_z + 0.5);
       len_0 = sqrt(pow(x_0, 2) + pow(y_0, 2) + pow(z_0, 2));
       first_read = false;
   }
-  len = sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2));
-  angle = acos((x_0 * x + y_0 * y + z_0 * z) / (len_0 * len));
+  len = sqrt(avg_x * avg_x + avg_y * avg_y + avg_z * avg_z);
+  angle = acos((x_0 * avg_x + y_0 * avg_y + z_0 * avg_z) / (len_0 * len));
   angle_deg = angle * (180.0 / M_PI);
 
-
-	// // send to network
   n = snprintf(p, dataCapacity, "%f\t", time_time());
 	p += n; dataCapacity -= n;
-	
-  n = snprintf(p, dataCapacity, "%f\t", (float)x / MODE4_SENSITIVITY);
+
+  n = snprintf(p, dataCapacity, "%f\t", avg_x / MODE4_SENSITIVITY);
 	p += n; dataCapacity -= n;
 
-  n = snprintf(p, dataCapacity, "%f\t", (float)y / MODE4_SENSITIVITY);
+  n = snprintf(p, dataCapacity, "%f\t", avg_y / MODE4_SENSITIVITY);
 	p += n; dataCapacity -= n;
 
-  n = snprintf(p, dataCapacity, "%f\t", (float)z / MODE4_SENSITIVITY);
+  n = snprintf(p, dataCapacity, "%f\t", avg_z / MODE4_SENSITIVITY);
 	p += n; dataCapacity -= n;
 
   n = snprintf(p, dataCapacity, "%f\t", angle_deg);
@@ -396,7 +474,7 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
   n = snprintf(p, dataCapacity, "%.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
 	p += n; dataCapacity -= n;
 
-  n = snprintf(p, dataCapacity, "%d\t", sto);
+  n = snprintf(p, dataCapacity, "%d\t", snap_sto);
 	p += n; dataCapacity -= n;
 
   n = snprintf(p, dataCapacity, "%.2f", temp_celsius);
@@ -410,27 +488,7 @@ void collectSensorData(int h, char *dataSending, size_t dataCapacity) {
 		exit(1);
 	}
 
-  // // raw
-  //  printf("%f\t", time_time());
-  //  printf("%f\t", (float)x / MODE4_SENSITIVITY);
-  //  printf("%f\t", (float)y / MODE4_SENSITIVITY);
-  //  printf("%f\t", (float)z / MODE4_SENSITIVITY);
-  //  printf("%f\t", angle_deg);
-  //  printf("%.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
-  //  printf("%d\t", sto);
-
-	// // human
-  //  printf("ts = %f\t", time_time());
-  //  printf("x = %fg\t", (float)x / MODE4_SENSITIVITY);
-  //  printf("y = %fg\t", (float)y / MODE4_SENSITIVITY);
-  //  printf("z = %fg\t", (float)z / MODE4_SENSITIVITY);
-  //  printf("angle = %f\t", angle_deg);
-  //  printf("crc_ok_rate = %.2f\t", (float)stats_crc_ok_count/(float)stats_frame_count);
-  //  printf("sto = %d\t", sto);
-  //}
-  //printf("\n");
-
-  printf("%f\n", angle_deg);
+  printf("angle=%f samples=%u\n", angle_deg, snap_count);
 }
 
 void swResetAndCheck(int h) {
@@ -440,7 +498,7 @@ void swResetAndCheck(int h) {
 
   bool crc_ok;
   uint8_t rw, addr, rs;
-  char data1, data2;
+  uint8_t data1, data2;
 
   setMode4(h);
   time_sleep(1.0 / MODE4_HZ);
@@ -493,10 +551,18 @@ int main(int argc, char *argv[]) {
 
     swResetAndCheck(h);
 
-		printf("Listening on port %d\n", PORT);
+    // Launch background reader thread
+    pthread_t reader_tid;
+    if (pthread_create(&reader_tid, NULL, reader_thread, &h) != 0) {
+        printf("Failed to create reader thread!\n");
+        return 1;
+    }
+    pthread_detach(reader_tid);
+
+		printf("Listening on port %d, reader at %d%% ODR speed\n", PORT, READ_SPEED_PCT);
 		while (true) {
 				clintConnt = accept(clintListn, (struct sockaddr*)NULL, NULL);
-				collectSensorData(h, &dataSending[0], 1025);
+				collectSensorData(&dataSending[0], 1025);
 				write(clintConnt, dataSending, strlen(dataSending));
 
         close(clintConnt);
