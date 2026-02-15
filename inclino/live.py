@@ -3,6 +3,7 @@
 import argparse
 import os
 import socket
+import subprocess
 import time
 
 PORT = 2017
@@ -62,6 +63,21 @@ def main():
             x, y, total = get_angles()
             if args.once:
                 print(f"X={x:+.4f}° Y={y:+.4f}° total={total:.4f}°")
+                try:
+                    ps = subprocess.run(
+                        ["ps", "-eo", "pid,etimes,comm", "--no-headers"],
+                        capture_output=True, text=True, timeout=5)
+                    for line in ps.stdout.splitlines():
+                        parts = line.split()
+                        if len(parts) >= 3 and "scl3300" in parts[2]:
+                            pid, elapsed_s = parts[0], int(parts[1])
+                            h, m, s = elapsed_s // 3600, elapsed_s % 3600 // 60, elapsed_s % 60
+                            print(f"scl3300-d01 pid={pid} uptime={h}h{m:02d}m{s:02d}s")
+                            break
+                    else:
+                        print("scl3300-d01 process not found")
+                except Exception as e:
+                    print(f"ps lookup failed: {e}")
                 return
             if zero_x is None:
                 zero_x, zero_y = x, y
