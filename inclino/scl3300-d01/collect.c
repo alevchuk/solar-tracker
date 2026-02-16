@@ -74,7 +74,7 @@ const char SELBANK = 0x1F;
 
 // Read speed: 1-100, percentage of max ODR speed.
 // 100 = full 2 kHz (read every 0.5ms), 50 = 1 kHz, 10 = 200 Hz, etc.
-#define READ_SPEED_PCT 80
+#define READ_SPEED_PCT 10
 
 // Server
 const int PORT = 2017;
