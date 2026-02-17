@@ -1,0 +1,12 @@
+{
+  "raw_x": 259,
+  "raw_y": -262,
+  "raw_z": 11877,
+  "x": 0.021544,
+  "y": -0.021905,
+  "z": 0.98973,
+  "ang_x": 1.2460,
+  "ang_y": -1.2682,
+  "timestamp": "2026-02-15T20:00:00",
+  "note": "Initial reference position (from JSONL log)"
+}
