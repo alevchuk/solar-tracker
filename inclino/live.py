@@ -46,6 +46,8 @@ def main():
     parser = argparse.ArgumentParser(description="Live SCL3300 angle display")
     parser.add_argument("-1", "--once", action="store_true",
                         help="print one reading and exit")
+    parser.add_argument("-d", "--delta", action="store_true",
+                        help="show X/Y as offset from first reading")
     args = parser.parse_args()
 
     zero_x, zero_y = None, None
@@ -79,11 +81,13 @@ def main():
                 except Exception as e:
                     print(f"ps lookup failed: {e}")
                 return
-            if zero_x is None:
-                zero_x, zero_y = x, y
-                print(f"  zero: X={zero_x:+.4f}° Y={zero_y:+.4f}°")
-            dx = x - zero_x
-            dy = y - zero_y
+            if args.delta:
+                if zero_x is None:
+                    zero_x, zero_y = x, y
+                    print(f"  reference: first-read X={zero_x:+.4f}° Y={zero_y:+.4f}°")
+                dx, dy = x - zero_x, y - zero_y
+            else:
+                dx, dy = x, y
             peak = max(peak, abs(dx), abs(dy))
             scale = peak * 1.1
             print(f"X {dx:+8.4f} {bar(dx, scale, bar_w, 'x')}  ±{scale:.4f}°")

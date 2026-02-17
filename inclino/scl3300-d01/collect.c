@@ -30,6 +30,7 @@
 #include <arpa/inet.h> // defines in_addr structure
 #include <sys/socket.h> // for socket creation
 #include <netinet/in.h> //contains constants and structures needed for internet domain addresses
+#include <getopt.h>
 
 
 #define DATA_FORMAT   0x31  // data format register address
@@ -157,13 +158,34 @@ const int MODE3_HZ = 10;
 const int MODE4_HZ = 10;
 const int speedSPI = 2000000;  // SPI communication speed, 2 MHz per datasheet Table 8 recommendation
 
+// Reference position JSON default path
+#define REF_JSON_DEFAULT "/home/sunkids/reference_position.json"
+
 // Global status
 int stats_frame_count = 0;
 int stats_crc_ok_count = 0;
 int stats_temperature = -1000;
 bool first_read = true;
-short x_0, y_0, z_0;
+double x_0, y_0, z_0;
 double len_0;
+
+// Parse reference_position.json: extracts "x", "y", "z" fields (g-values)
+// Returns 1 on success, 0 on failure.
+int load_reference_json(const char *path, double *rx, double *ry, double *rz) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char buf[1024];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    int found = 0;
+    char *p;
+    if ((p = strstr(buf, "\"x\""))) { if (sscanf(p, "\"x\" : %lf", rx) == 1 || sscanf(p, "\"x\": %lf", rx) == 1) found++; }
+    if ((p = strstr(buf, "\"y\""))) { if (sscanf(p, "\"y\" : %lf", ry) == 1 || sscanf(p, "\"y\": %lf", ry) == 1) found++; }
+    if ((p = strstr(buf, "\"z\""))) { if (sscanf(p, "\"z\" : %lf", rz) == 1 || sscanf(p, "\"z\": %lf", rz) == 1) found++; }
+    return found == 3;
+}
 
 void readSPIFrame(int h, const char next_cmd[], uint8_t* rw, uint8_t* addr, uint8_t* rs, uint8_t* data1, uint8_t* data2, bool* crc_ok) {
   // this is according to datasheet_scl3300-d01 section 5.1.3 "SPI frame"
@@ -507,11 +529,12 @@ void collectSensorData(char *dataSending, size_t dataCapacity) {
   double angle, angle_deg;
 
   if (first_read) {
-      x_0 = (short)(avg_x + 0.5);
-      y_0 = (short)(avg_y + 0.5);
-      z_0 = (short)(avg_z + 0.5);
-      len_0 = sqrt(pow(x_0, 2) + pow(y_0, 2) + pow(z_0, 2));
+      x_0 = avg_x;
+      y_0 = avg_y;
+      z_0 = avg_z;
+      len_0 = sqrt(x_0*x_0 + y_0*y_0 + z_0*z_0);
       first_read = false;
+      printf("reference: first-read x=%.6f y=%.6f z=%.6f (raw)\n", x_0, y_0, z_0);
   }
   len = sqrt(avg_x * avg_x + avg_y * avg_y + avg_z * avg_z);
   angle = acos((x_0 * avg_x + y_0 * avg_y + z_0 * avg_z) / (len_0 * len));
@@ -600,6 +623,59 @@ void swResetAndCheck(int h) {
 }
 
 int main(int argc, char *argv[]) {
+
+    // Parse CLI arguments
+    int opt;
+    const char *ref_file = NULL;
+    double cli_x = 0, cli_y = 0, cli_z = 0;
+    bool ref_from_cli = false;
+
+    while ((opt = getopt(argc, argv, "r:f:")) != -1) {
+        switch (opt) {
+        case 'r':
+            if (sscanf(optarg, "%lf,%lf,%lf", &cli_x, &cli_y, &cli_z) == 3) {
+                ref_from_cli = true;
+            } else {
+                fprintf(stderr, "Usage: -r x,y,z (g-values, e.g. -r 0.0215,-0.0219,0.990)\n");
+                return 1;
+            }
+            break;
+        case 'f':
+            ref_file = optarg;
+            break;
+        default:
+            fprintf(stderr, "Usage: %s [-r x,y,z] [-f reference.json]\n", argv[0]);
+            return 1;
+        }
+    }
+
+    // Load reference position: CLI -r > CLI -f > default JSON > first-read fallback
+    if (ref_from_cli) {
+        x_0 = cli_x * MODE4_SENSITIVITY;
+        y_0 = cli_y * MODE4_SENSITIVITY;
+        z_0 = cli_z * MODE4_SENSITIVITY;
+        len_0 = sqrt(x_0*x_0 + y_0*y_0 + z_0*z_0);
+        first_read = false;
+        printf("reference: CLI x=%.6fg y=%.6fg z=%.6fg (raw: %.1f %.1f %.1f)\n",
+               cli_x, cli_y, cli_z, x_0, y_0, z_0);
+    } else {
+        const char *json_path = ref_file ? ref_file : REF_JSON_DEFAULT;
+        double jx, jy, jz;
+        if (load_reference_json(json_path, &jx, &jy, &jz)) {
+            x_0 = jx * MODE4_SENSITIVITY;
+            y_0 = jy * MODE4_SENSITIVITY;
+            z_0 = jz * MODE4_SENSITIVITY;
+            len_0 = sqrt(x_0*x_0 + y_0*y_0 + z_0*z_0);
+            first_read = false;
+            printf("reference: %s x=%.6fg y=%.6fg z=%.6fg (raw: %.1f %.1f %.1f)\n",
+                   json_path, jx, jy, jz, x_0, y_0, z_0);
+        } else if (ref_file) {
+            fprintf(stderr, "ERROR: could not load reference from %s\n", ref_file);
+            return 1;
+        } else {
+            printf("reference: no %s found, will use first reading\n", REF_JSON_DEFAULT);
+        }
+    }
 
 		// start TCP server
 		char dataSending[1025]; // Actually this is called packet in Network Communication, which contain data and send through.
