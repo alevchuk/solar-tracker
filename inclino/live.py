@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Live display of SCL3300 angle readings at 1-second cadence."""
 import argparse
+import json
 import os
 import socket
 import subprocess
 import time
+
+REF_JSON_DEFAULT = os.path.expanduser("~/reference_position.json")
 
 PORT = 2017
 MIN_RANGE = 0.005  # minimum +/- range in degrees
@@ -51,6 +54,18 @@ def main():
     args = parser.parse_args()
 
     zero_x, zero_y = None, None
+
+    # Load reference from JSON when in delta mode
+    if args.delta:
+        try:
+            with open(REF_JSON_DEFAULT) as f:
+                ref = json.load(f)
+            if "ang_x" in ref and "ang_y" in ref:
+                zero_x, zero_y = ref["ang_x"], ref["ang_y"]
+                print(f"  reference: {REF_JSON_DEFAULT} X={zero_x:+.4f}° Y={zero_y:+.4f}°")
+        except FileNotFoundError:
+            print(f"  reference: no {REF_JSON_DEFAULT}, will use first reading")
+
     peak = MIN_RANGE
     while True:
         try:

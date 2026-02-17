@@ -166,12 +166,12 @@ int stats_frame_count = 0;
 int stats_crc_ok_count = 0;
 int stats_temperature = -1000;
 bool first_read = true;
-double x_0, y_0, z_0;
+short x_0, y_0, z_0;
 double len_0;
 
-// Parse reference_position.json: extracts "x", "y", "z" fields (g-values)
+// Parse reference_position.json: extracts "raw_x", "raw_y", "raw_z" fields (raw LSB values)
 // Returns 1 on success, 0 on failure.
-int load_reference_json(const char *path, double *rx, double *ry, double *rz) {
+int load_reference_json(const char *path, int *rx, int *ry, int *rz) {
     FILE *f = fopen(path, "r");
     if (!f) return 0;
     char buf[1024];
@@ -181,9 +181,9 @@ int load_reference_json(const char *path, double *rx, double *ry, double *rz) {
 
     int found = 0;
     char *p;
-    if ((p = strstr(buf, "\"x\""))) { if (sscanf(p, "\"x\" : %lf", rx) == 1 || sscanf(p, "\"x\": %lf", rx) == 1) found++; }
-    if ((p = strstr(buf, "\"y\""))) { if (sscanf(p, "\"y\" : %lf", ry) == 1 || sscanf(p, "\"y\": %lf", ry) == 1) found++; }
-    if ((p = strstr(buf, "\"z\""))) { if (sscanf(p, "\"z\" : %lf", rz) == 1 || sscanf(p, "\"z\": %lf", rz) == 1) found++; }
+    if ((p = strstr(buf, "\"raw_x\""))) { if (sscanf(p, "\"raw_x\" : %d", rx) == 1 || sscanf(p, "\"raw_x\": %d", rx) == 1) found++; }
+    if ((p = strstr(buf, "\"raw_y\""))) { if (sscanf(p, "\"raw_y\" : %d", ry) == 1 || sscanf(p, "\"raw_y\": %d", ry) == 1) found++; }
+    if ((p = strstr(buf, "\"raw_z\""))) { if (sscanf(p, "\"raw_z\" : %d", rz) == 1 || sscanf(p, "\"raw_z\": %d", rz) == 1) found++; }
     return found == 3;
 }
 
@@ -529,12 +529,12 @@ void collectSensorData(char *dataSending, size_t dataCapacity) {
   double angle, angle_deg;
 
   if (first_read) {
-      x_0 = avg_x;
-      y_0 = avg_y;
-      z_0 = avg_z;
-      len_0 = sqrt(x_0*x_0 + y_0*y_0 + z_0*z_0);
+      x_0 = (short)(avg_x + 0.5);
+      y_0 = (short)(avg_y + 0.5);
+      z_0 = (short)(avg_z + 0.5);
+      len_0 = sqrt(pow(x_0, 2) + pow(y_0, 2) + pow(z_0, 2));
       first_read = false;
-      printf("reference: first-read x=%.6f y=%.6f z=%.6f (raw)\n", x_0, y_0, z_0);
+      printf("reference: first-read x=%d y=%d z=%d (raw)\n", x_0, y_0, z_0);
   }
   len = sqrt(avg_x * avg_x + avg_y * avg_y + avg_z * avg_z);
   angle = acos((x_0 * avg_x + y_0 * avg_y + z_0 * avg_z) / (len_0 * len));
@@ -627,16 +627,17 @@ int main(int argc, char *argv[]) {
     // Parse CLI arguments
     int opt;
     const char *ref_file = NULL;
-    double cli_x = 0, cli_y = 0, cli_z = 0;
     bool ref_from_cli = false;
+
+    int cli_rx = 0, cli_ry = 0, cli_rz = 0;
 
     while ((opt = getopt(argc, argv, "r:f:")) != -1) {
         switch (opt) {
         case 'r':
-            if (sscanf(optarg, "%lf,%lf,%lf", &cli_x, &cli_y, &cli_z) == 3) {
+            if (sscanf(optarg, "%d,%d,%d", &cli_rx, &cli_ry, &cli_rz) == 3) {
                 ref_from_cli = true;
             } else {
-                fprintf(stderr, "Usage: -r x,y,z (g-values, e.g. -r 0.0215,-0.0219,0.990)\n");
+                fprintf(stderr, "Usage: -r raw_x,raw_y,raw_z (raw LSB values, e.g. -r 258,-263,11880)\n");
                 return 1;
             }
             break;
@@ -644,31 +645,29 @@ int main(int argc, char *argv[]) {
             ref_file = optarg;
             break;
         default:
-            fprintf(stderr, "Usage: %s [-r x,y,z] [-f reference.json]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-r raw_x,raw_y,raw_z] [-f reference.json]\n", argv[0]);
             return 1;
         }
     }
 
     // Load reference position: CLI -r > CLI -f > default JSON > first-read fallback
     if (ref_from_cli) {
-        x_0 = cli_x * MODE4_SENSITIVITY;
-        y_0 = cli_y * MODE4_SENSITIVITY;
-        z_0 = cli_z * MODE4_SENSITIVITY;
-        len_0 = sqrt(x_0*x_0 + y_0*y_0 + z_0*z_0);
+        x_0 = (short)cli_rx;
+        y_0 = (short)cli_ry;
+        z_0 = (short)cli_rz;
+        len_0 = sqrt(pow(x_0, 2) + pow(y_0, 2) + pow(z_0, 2));
         first_read = false;
-        printf("reference: CLI x=%.6fg y=%.6fg z=%.6fg (raw: %.1f %.1f %.1f)\n",
-               cli_x, cli_y, cli_z, x_0, y_0, z_0);
+        printf("reference: CLI x=%d y=%d z=%d (raw)\n", x_0, y_0, z_0);
     } else {
         const char *json_path = ref_file ? ref_file : REF_JSON_DEFAULT;
-        double jx, jy, jz;
+        int jx, jy, jz;
         if (load_reference_json(json_path, &jx, &jy, &jz)) {
-            x_0 = jx * MODE4_SENSITIVITY;
-            y_0 = jy * MODE4_SENSITIVITY;
-            z_0 = jz * MODE4_SENSITIVITY;
-            len_0 = sqrt(x_0*x_0 + y_0*y_0 + z_0*z_0);
+            x_0 = (short)jx;
+            y_0 = (short)jy;
+            z_0 = (short)jz;
+            len_0 = sqrt(pow(x_0, 2) + pow(y_0, 2) + pow(z_0, 2));
             first_read = false;
-            printf("reference: %s x=%.6fg y=%.6fg z=%.6fg (raw: %.1f %.1f %.1f)\n",
-                   json_path, jx, jy, jz, x_0, y_0, z_0);
+            printf("reference: %s x=%d y=%d z=%d (raw)\n", json_path, x_0, y_0, z_0);
         } else if (ref_file) {
             fprintf(stderr, "ERROR: could not load reference from %s\n", ref_file);
             return 1;
