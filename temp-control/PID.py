@@ -11,11 +11,15 @@ signal.signal(signal.SIGHUP, _shutdown)
 INCLO_PORT = 2017
 
 def get_temp():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(5)
-        s.connect(("127.0.0.1", INCLO_PORT))
-        data = s.recv(1024).decode().strip()
-    return float(data.split("\t")[7])
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(5)
+            s.connect(("127.0.0.1", INCLO_PORT))
+            data = s.recv(1024).decode().strip()
+        return float(data.split("\t")[7])
+    except (socket.error, IndexError, ValueError) as e:
+        print(f"temp read failed: {e}")
+        return None
 
 # --- PWM setup ---
 PWM_CHIP = "/sys/class/pwm/pwmchip0"
@@ -42,7 +46,12 @@ w(f"{PWM_PATH}/period", PERIOD_NS)
 w(f"{PWM_PATH}/duty_cycle", 0)
 w(f"{PWM_PATH}/enable", 1)
 
-# --- PID parameters ---
+# --- PID controller ---
+# Heat-only system: PWM drives a heater, cooling is passive (ambient).
+# Overshoot is costly because there is no active cooling — the system must
+# wait for passive heat dissipation, which can be very slow.
+# The integral term is clamped directly to [MIN_OUT, MAX_OUT] to prevent
+# windup during the long ramp from ambient to setpoint.
 SETPOINT = 24.0   # °C
 DT       = 5      # loop interval (seconds)
 MIN_OUT  = 0.0    # % duty
@@ -60,24 +69,14 @@ print(f"PID controller: setpoint={SETPOINT} °C, Kp={Kp}, Ki={Ki}, Kd={Kd}, rang
 try:
     while True:
         temp = get_temp()
+        if temp is None:
+            time.sleep(DT)
+            continue
         error = SETPOINT - temp
 
-        # Proportional
+        # PID terms
         p = Kp * error
-
-        # Reset integral on zero crossing
-        if prev_error is not None and error * prev_error < 0:
-            integral = 0.0
-
-        # Integral with anti-windup
-        candidate = integral + Ki * error * DT
-        raw_output = p + candidate + (Kd * (error - prev_error) / DT if prev_error is not None else 0)
-
-        if MIN_OUT <= raw_output <= MAX_OUT:
-            integral = candidate
-        # else: don't accumulate — output is saturated
-
-        # Derivative
+        integral = max(MIN_OUT, min(MAX_OUT, integral + Ki * error * DT))
         d = Kd * (error - prev_error) / DT if prev_error is not None else 0.0
         prev_error = error
 
