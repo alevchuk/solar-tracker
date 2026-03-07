@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import time, os, signal, socket
+import time, os, signal, socket, datetime
 
 def _shutdown(signum, frame):
     raise SystemExit(0)
@@ -52,7 +52,7 @@ w(f"{PWM_PATH}/enable", 1)
 # wait for passive heat dissipation, which can be very slow.
 # The integral term is clamped directly to [MIN_OUT, MAX_OUT] to prevent
 # windup during the long ramp from ambient to setpoint.
-SETPOINT = 24.0   # °C
+SETPOINT = 25.0   # °C
 DT       = 5      # loop interval (seconds)
 MIN_OUT  = 0.0    # % duty
 MAX_OUT  = 20.0   # % duty
@@ -83,7 +83,8 @@ try:
         output = max(MIN_OUT, min(MAX_OUT, p + integral + d))
         set_duty(output)
 
-        print(f"temp={temp:6.2f} °C  err={error:+6.2f}  P={p:5.2f} I={integral:5.2f} D={d:+6.2f}  duty={output:5.2f}%")
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{ts}  temp={temp:6.2f} °C  err={error:+6.2f}  P={p:5.2f} I={integral:5.2f} D={d:+6.2f}  duty={output:5.2f}%")
         time.sleep(DT)
 
 except (KeyboardInterrupt, SystemExit):
